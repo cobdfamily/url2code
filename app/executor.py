@@ -205,6 +205,21 @@ def execute_endpoint(
             status_code=500,
             detail=f"CLI executable not found: {endpoint.command.executable}",
         ) from exc
+    except OSError as exc:
+        _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
+        logger.exception(
+            "CLI executable could not be launched",
+            extra={
+                "endpoint": endpoint.name,
+                "command": shlex.join(command),
+                "request_overrides": request.overrides,
+                "status_code": 500,
+            },
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"CLI executable could not be launched: {exc}",
+        ) from exc
     except subprocess.TimeoutExpired as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         _cleanup_files({key: value["path"] for key, value in output_file_results.items()})

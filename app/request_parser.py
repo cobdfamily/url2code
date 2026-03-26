@@ -52,10 +52,20 @@ async def parse_request(request: Request, endpoint: EndpointConfig) -> tuple[Too
                 )
             uploads[upload_config.placeholder] = value
 
+        overrides_raw = form.get("overrides")
+        if isinstance(overrides_raw, UploadFile):
+            raise HTTPException(status_code=400, detail="form field 'overrides' must be a string, not a file upload")
+        extra_args_raw = form.get("extra_args")
+        if isinstance(extra_args_raw, UploadFile):
+            raise HTTPException(status_code=400, detail="form field 'extra_args' must be a string, not a file upload")
+        stdin_raw = form.get("stdin")
+        if isinstance(stdin_raw, UploadFile):
+            raise HTTPException(status_code=400, detail="form field 'stdin' must be a string, not a file upload")
+
         tool_request = ToolRequest(
-            overrides=_coerce_json_dict(form.get("overrides"), "overrides"),
-            extra_args=_coerce_json_list(form.get("extra_args"), "extra_args"),
-            stdin=form.get("stdin"),
+            overrides=_coerce_json_dict(overrides_raw, "overrides"),
+            extra_args=_coerce_json_list(extra_args_raw, "extra_args"),
+            stdin=stdin_raw,
         )
         return tool_request, uploads
 
@@ -65,7 +75,13 @@ async def parse_request(request: Request, endpoint: EndpointConfig) -> tuple[Too
             detail=f"endpoint '{endpoint.name}' requires multipart/form-data uploads",
         )
 
-    body = await request.json()
+    raw_body = await request.body()
+    if not raw_body:
+        return ToolRequest(), uploads
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="request body must be valid JSON") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="request body must be a JSON object")
     return ToolRequest.model_validate(body), uploads
