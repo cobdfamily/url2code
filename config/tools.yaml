@@ -1,0 +1,99 @@
+api:
+  title: URL2Code CLI API
+  version: 0.1.0
+  default_root: /
+
+logging:
+  level: INFO
+
+endpoints:
+  - name: audfprint-match
+    description: Match audio against an audfprint database.
+    route: /match
+    root: /audfprint
+    method: POST
+    defaults:
+      db_path: /data/audfprint/db.pklz
+      query_file: /data/input.wav
+    command:
+      executable: audfprint
+      args:
+        - match
+        - --dbase
+        - "{db_path}"
+        - "{query_file}"
+      timeout_seconds: 60
+    request:
+      validations:
+        db_path:
+          type: text
+        query_file:
+          type: text
+      allow_extra_args: true
+    output:
+      mode: regex_json
+      regex:
+        pattern: "(?P<track>.+)\\s+matched\\s+(?P<score>\\d+)\\s+times"
+
+  - name: file2braille-translate
+    description: Convert a file using file2braille.
+    route: /translate
+    root: /file2braille
+    method: POST
+    defaults:
+      table: en-us-g2.ctb
+    command:
+      executable: file2braille
+      args:
+        - --table
+        - "{table}"
+        - "{input_file}"
+        - "{output_file}"
+      timeout_seconds: 60
+    request:
+      validations:
+        table:
+          type: enum
+          choices:
+            - en-us-g2.ctb
+            - en-us-g1.ctb
+      allow_extra_args: true
+    uploads:
+      - field_name: input_file
+        placeholder: input_file
+        temp_dir: /tmp/url2code/uploads/file2braille
+    output_files:
+      - placeholder: output_file
+        filename_placeholder: output_filename
+        output_dir: /tmp/url2code/outputs/file2braille
+        suffix: .brf
+        prefix: file2braille-
+    output:
+      mode: text
+
+  - name: dog-walk
+    description: Example showing request-time argument override.
+    route: /walk
+    root: /dogs
+    method: POST
+    defaults:
+      action: walk
+      speed: slow
+    command:
+      executable: dog
+      args:
+        - "{action}"
+        - --speed
+        - "{speed}"
+    request:
+      validations:
+        action:
+          type: enum
+          choices:
+            - walk
+            - jump
+            - run
+        speed:
+          type: text
+    output:
+      mode: text
