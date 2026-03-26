@@ -2,26 +2,30 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import shlex
 import subprocess
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
 
-from .config import EndpointConfig
+from .config import EndpointConfig, FlagConfig
 from .models import ToolRequest, ToolResponse
 from .parser import OutputParseError, parse_output
 
 logger = logging.getLogger("cli_api.executor")
 
 
+def _random_filename_token() -> str:
+    return secrets.token_hex(32)
+
+
 def _write_upload(upload: UploadFile, temp_dir: str) -> str:
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
     suffix = Path(upload.filename or "").suffix
-    path = Path(temp_dir) / f"{uuid.uuid4().hex}{suffix}"
+    path = Path(temp_dir) / f"{_random_filename_token()}{suffix}"
     with path.open("wb") as handle:
         upload.file.seek(0)
         handle.write(upload.file.read())
@@ -30,7 +34,7 @@ def _write_upload(upload: UploadFile, temp_dir: str) -> str:
 
 def _build_output_path(output_dir: str, prefix: str | None, suffix: str | None) -> str:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    filename = f"{prefix or ''}{uuid.uuid4().hex}{suffix or ''}"
+    filename = f"{prefix or ''}{_random_filename_token()}{suffix or ''}"
     return str(Path(output_dir) / filename)
 
 
@@ -83,6 +87,90 @@ def _validated_overrides(endpoint: EndpointConfig, overrides: dict[str, Any]) ->
     return {key: _coerce_override_value(endpoint, key, value) for key, value in overrides.items()}
 
 
+def _resolved_override_values(endpoint: EndpointConfig, request: ToolRequest) -> dict[str, Any]:
+    resolved = dict(request.overrides)
+    for name in endpoint.request.allowed_overrides:
+        if name in resolved:
+            continue
+        if name in request.flag_values:
+            resolved[name] = request.flag_values[name]
+    return _validated_overrides(endpoint, resolved)
+
+
+def _validate_flag_value(flag_config: FlagConfig, value: Any) -> Any:
+    if flag_config.type == "number":
+        if isinstance(value, bool):
+            raise HTTPException(status_code=400, detail=f"flag '{flag_config.name}' must be a number")
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            try:
+                return float(value) if "." in value else int(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"flag '{flag_config.name}' must be a number") from exc
+        raise HTTPException(status_code=400, detail=f"flag '{flag_config.name}' must be a number")
+
+    if flag_config.type == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        raise HTTPException(status_code=400, detail=f"flag '{flag_config.name}' must be a boolean")
+
+    if flag_config.type == "enum":
+        if not isinstance(value, str):
+            raise HTTPException(
+                status_code=400,
+                detail=f"flag '{flag_config.name}' must be one of: {', '.join(flag_config.choices)}",
+            )
+        if value not in flag_config.choices:
+            raise HTTPException(
+                status_code=400,
+                detail=f"flag '{flag_config.name}' must be one of: {', '.join(flag_config.choices)}",
+            )
+        return value
+
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"flag '{flag_config.name}' must be text")
+    return value
+
+
+def _render_flag_args(endpoint: EndpointConfig, request: ToolRequest) -> list[str]:
+    rendered: list[str] = []
+    allowed_names = {flag.name for flag in endpoint.request.flags}
+    disallowed = sorted(set(request.flag_values) - allowed_names - set(endpoint.request.allowed_overrides))
+    if disallowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported request fields for endpoint '{endpoint.name}': {', '.join(disallowed)}",
+        )
+
+    for flag_config in endpoint.request.flags:
+        if flag_config.name in request.flag_values:
+            raw_value = request.flag_values[flag_config.name]
+        elif flag_config.name in endpoint.defaults:
+            raw_value = endpoint.defaults[flag_config.name]
+        else:
+            continue
+        value = _validate_flag_value(flag_config, raw_value)
+        if flag_config.type == "bool":
+            if not value:
+                continue
+            if flag_config.valuePrefix:
+                rendered.extend([flag_config.flag, f"{flag_config.valuePrefix}true"])
+            else:
+                rendered.append(flag_config.flag)
+            continue
+
+        rendered.extend([flag_config.flag, f"{flag_config.valuePrefix}{_stringify_template_value(value)}"])
+
+    return rendered
+
+
 def _stringify_template_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -106,9 +194,7 @@ def build_command(
     values: dict[str, str] = {
         key: _stringify_template_value(value) for key, value in dict(endpoint.defaults).items()
     }
-    values.update(
-        {key: _stringify_template_value(value) for key, value in _validated_overrides(endpoint, request.overrides).items()}
-    )
+    values.update({key: _stringify_template_value(value) for key, value in _resolved_override_values(endpoint, request).items()})
     values.update({key: _stringify_template_value(value) for key, value in upload_paths.items()})
     values.update({key: _stringify_template_value(value) for key, value in output_values.items()})
 
@@ -122,6 +208,8 @@ def build_command(
             status_code=400,
             detail=f"missing argument value for placeholder '{missing_key}'",
         ) from exc
+
+    rendered_args.extend(_render_flag_args(endpoint, request))
 
     if request.extra_args:
         if not endpoint.request.allow_extra_args:
@@ -138,8 +226,10 @@ def execute_endpoint(
     endpoint: EndpointConfig,
     request: ToolRequest,
     uploads: dict[str, UploadFile] | None = None,
+    download_path_templates: dict[str, str] | None = None,
 ) -> ToolResponse:
     uploads = uploads or {}
+    download_path_templates = download_path_templates or {}
     upload_paths: dict[str, str] = {}
     output_file_results: dict[str, dict[str, str]] = {}
     output_values: dict[str, str] = {}
@@ -155,6 +245,10 @@ def execute_endpoint(
             "path": output_path,
             "filename": output_filename,
         }
+        if output_file.placeholder in download_path_templates:
+            output_file_results[output_file.placeholder]["download_url"] = download_path_templates[
+                output_file.placeholder
+            ].format(filename=output_filename)
         output_values[output_file.placeholder] = output_path
         if output_file.filename_placeholder:
             output_values[output_file.filename_placeholder] = output_filename

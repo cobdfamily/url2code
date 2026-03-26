@@ -25,6 +25,7 @@ class JsonFormatter(logging.Formatter):
             "stderr",
             "request_overrides",
             "output_files",
+            "config_summary",
         ):
             value = getattr(record, key, None)
             if value is not None:

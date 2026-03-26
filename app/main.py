@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import logging
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 
-from .config import AppConfig, EndpointConfig, load_config
+from .config import AppConfig, EndpointConfig, build_full_path, load_config, summarize_config
 from .executor import execute_endpoint
 from .logging_config import configure_logging
 from .models import ToolResponse
@@ -16,29 +18,52 @@ DEFAULT_CONFIG_PATH = "config/tools.yaml"
 logger = logging.getLogger("cli_api")
 
 
-def _normalize_root(root: str) -> str:
-    if not root or root == "/":
-        return ""
-    return "/" + root.strip("/")
+def build_output_download_path(endpoint_path: str, output_placeholder: str, filename: str = "{filename}") -> str:
+    return f"{endpoint_path.rstrip('/')}/downloads/{output_placeholder}/{filename}"
 
 
-def _normalize_route(route: str) -> str:
-    return "/" + route.strip("/")
+def register_download_routes(app: FastAPI, endpoint: EndpointConfig, endpoint_path: str) -> dict[str, str]:
+    download_templates: dict[str, str] = {}
+    output_file_lookup = {output_file.placeholder: output_file for output_file in endpoint.output_files}
 
+    if not output_file_lookup:
+        return download_templates
 
-def _full_path(default_root: str, endpoint: EndpointConfig) -> str:
-    root = endpoint.root if endpoint.root is not None else default_root
-    normalized_root = _normalize_root(root)
-    normalized_route = _normalize_route(endpoint.route)
-    return normalized_route if not normalized_root else f"{normalized_root}{normalized_route}"
+    async def download_output(output_placeholder: str, filename: str) -> FileResponse:
+        output_file = output_file_lookup.get(output_placeholder)
+        if output_file is None:
+            raise HTTPException(status_code=404, detail="unknown output file")
 
+        if Path(filename).name != filename:
+            raise HTTPException(status_code=404, detail="invalid filename")
+
+        output_path = Path(output_file.output_dir) / filename
+        if not output_path.is_file():
+            raise HTTPException(status_code=404, detail="output file not found")
+
+        return FileResponse(path=output_path, filename=filename)
+
+    route_path = build_output_download_path(endpoint_path, "{output_placeholder}", "{filename}")
+    app.add_api_route(
+        path=route_path,
+        endpoint=download_output,
+        methods=["GET"],
+        name=f"{endpoint.name}-download",
+        description=f"Download generated output files for {endpoint.name}.",
+    )
+
+    for placeholder in output_file_lookup:
+        download_templates[placeholder] = build_output_download_path(endpoint_path, placeholder)
+
+    return download_templates
 
 def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str) -> None:
-    path = _full_path(default_root, endpoint)
+    path = build_full_path(default_root, endpoint)
+    download_templates = register_download_routes(app, endpoint, path)
 
     async def handler(request: Request) -> ToolResponse:
         tool_request, uploads = await parse_request(request, endpoint)
-        return execute_endpoint(endpoint, tool_request, uploads)
+        return execute_endpoint(endpoint, tool_request, uploads, download_templates)
 
     app.add_api_route(
         path=path,
@@ -71,7 +96,10 @@ def build_application() -> FastAPI:
     config_path = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH)
     config = load_config(config_path)
     configure_logging(config.logging.level)
-    logger.info("Loaded configuration", extra={"status_code": 200})
+    logger.info(
+        "Loaded configuration",
+        extra={"status_code": 200, "config_summary": summarize_config(config)},
+    )
     return create_app(config)
 
 

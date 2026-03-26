@@ -19,17 +19,17 @@ endpoints:
       executable: audfprint
       args:
         - match
-        - --dbase
-        - "{db_path}"
         - "{query_file}"
       timeout_seconds: 60
     request:
       validations:
-        db_path:
-          type: text
         query_file:
           type: text
-      allow_extra_args: true
+      flags:
+        - name: db_path
+          flag: --dbase
+          valuePrefix: ""
+          type: text
     output:
       mode: regex_json
       regex:
@@ -51,13 +51,14 @@ endpoints:
         - "{output_file}"
       timeout_seconds: 60
     request:
-      validations:
-        table:
+      flags:
+        - name: table
+          flag: --table
+          valuePrefix: ""
           type: enum
           choices:
             - en-us-g2.ctb
             - en-us-g1.ctb
-      allow_extra_args: true
     uploads:
       - field_name: input_file
         placeholder: input_file
@@ -78,13 +79,10 @@ endpoints:
     method: POST
     defaults:
       action: walk
-      speed: slow
     command:
       executable: dog
       args:
         - "{action}"
-        - --speed
-        - "{speed}"
     request:
       validations:
         action:
@@ -93,7 +91,10 @@ endpoints:
             - walk
             - jump
             - run
-        speed:
+      flags:
+        - name: speed
+          flag: --speed
+          valuePrefix: ""
           type: text
     output:
       mode: text
