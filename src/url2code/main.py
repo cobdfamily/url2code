@@ -104,3 +104,11 @@ def build_application() -> FastAPI:
 
 
 app = build_application()
+
+
+def run() -> None:
+    """Console-script entrypoint (`uv run url2code`)."""
+    import uvicorn
+    host = os.getenv("URL2CODE_HOST", "0.0.0.0")
+    port = int(os.getenv("URL2CODE_PORT", "8000"))
+    uvicorn.run("url2code.main:app", host=host, port=port, reload=False)

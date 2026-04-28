@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from fastapi import HTTPException, Request, UploadFile
+from fastapi import HTTPException, Request
+# starlette.form() returns starlette.datastructures.UploadFile;
+# fastapi.UploadFile is a SUBCLASS, so isinstance(starlette_uf, fastapi.UploadFile)
+# is False. We need the base class for the runtime check.
+from starlette.datastructures import UploadFile
 
 from .config import EndpointConfig
 from .models import ToolRequest

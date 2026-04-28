@@ -1,16 +1,46 @@
-FROM python:3.12-slim
+# Two-stage build: uv builds the venv from the lockfile, runtime
+# image is python:3.12-slim with the venv copied in. uv stays in
+# the runtime image so operators can install Python-distributed CLI
+# tools at runtime via the same toolchain url2code wraps.
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir uv && uv pip install --system --no-cache -r requirements.txt
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-install-project --no-default-groups
 
-COPY app ./app
-COPY config ./config
+COPY src ./src
+RUN uv sync --frozen --no-default-groups
 
+
+FROM python:3.12-slim AS runtime
+
+# Install uv in the runtime image too so per-deployment CLI tools
+# (the things url2code wraps) can be added at container start.
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -LsSf https://astral.sh/uv/install.sh | sh \
+ && mv /root/.local/bin/uv /usr/local/bin/uv
+
+RUN groupadd --system --gid 1000 url2code \
+ && useradd --system --uid 1000 --gid 1000 \
+       --home /app --shell /sbin/nologin url2code
+
+WORKDIR /app
+COPY --from=builder --chown=url2code:url2code /app /app
+COPY --chown=url2code:url2code config /app/config
+
+ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER url2code
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "url2code.main:app", "--host", "0.0.0.0", "--port", "8000"]

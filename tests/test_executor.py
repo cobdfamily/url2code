@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from app.config import AppConfig, EndpointConfig, build_full_path, summarize_config
-from app.executor import _random_filename_token, build_command, execute_endpoint
-from app.main import build_output_download_path
-from app.models import ToolRequest
+from url2code.config import AppConfig, EndpointConfig, build_full_path, summarize_config
+from url2code.executor import _random_filename_token, build_command, execute_endpoint
+from url2code.main import build_output_download_path
+from url2code.models import ToolRequest
 from fastapi import HTTPException
 import subprocess
 import pytest
@@ -228,7 +228,7 @@ def test_execute_endpoint_returns_download_url(monkeypatch, tmp_path) -> None:
     def fake_run(*args, **kwargs):
         return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr("app.executor.subprocess.run", fake_run)
+    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
 
     response = execute_endpoint(
         endpoint,

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from app.config import EndpointConfig
-from app.models import ToolRequest
-from app.request_parser import parse_request
+from url2code.config import EndpointConfig, UploadConfig
+from url2code.request_parser import parse_request
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 import pytest
@@ -78,11 +77,11 @@ def test_parse_request_accepts_multipart_fields_and_uploads(tmp_path, parsing_en
     endpoint = parsing_endpoint.model_copy(
         update={
             "uploads": [
-                {
-                    "field_name": "input_file",
-                    "placeholder": "input_file",
-                    "temp_dir": str(tmp_path / "uploads"),
-                }
+                UploadConfig(
+                    field_name="input_file",
+                    placeholder="input_file",
+                    temp_dir=str(tmp_path / "uploads"),
+                )
             ]
         }
     )

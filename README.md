@@ -1,6 +1,12 @@
 # url2code
 
+[![test](https://github.com/cobdfamily/url2code/actions/workflows/test.yml/badge.svg)](https://github.com/cobdfamily/url2code/actions/workflows/test.yml)
+
 YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, can live under its own API root, supports request-time argument overrides, and can parse non-JSON CLI output into JSON using regex named capture groups.
+
+> Deploying url2code in production? See **[DEPLOYMENT.md](DEPLOYMENT.md)**
+> for the full checklist (image pull from the kibble registry,
+> configure / run / verify, upgrades).
 
 ## Features
 
