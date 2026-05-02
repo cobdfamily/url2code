@@ -82,7 +82,7 @@ def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str)
 def create_app(config: AppConfig) -> FastAPI:
     app = FastAPI(
         title=config.api.title,
-        version="1.0.1",
+        version="1.0.2",
         redoc_url="/redocs",
     )
 
