@@ -73,7 +73,7 @@ Behind your TLS reverse proxy, route
 
 ```sh
 # Liveness
-curl -fsS https://tools.cobd.ca/healthz
+curl -fsS https://tools.cobd.ca/
 
 # Each endpoint declared in your config.yaml is now
 # reachable. Exact URL depends on its `route_root` and

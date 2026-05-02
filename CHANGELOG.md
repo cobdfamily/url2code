@@ -5,6 +5,17 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-02
+
+### Changed
+- Liveness endpoint moved from `GET /healthz`
+  (`{"status":"ok"}`) to `GET /`
+  (`{"service":"url2code","status":"ok"}`) to match the
+  cobdfamily microservice fleet convention.
+- ReDoc moved from the FastAPI default `/redoc` to
+  `/redocs` (note trailing `s`) via `redoc_url` on the
+  FastAPI constructor.
+
 ## [1.0.0] - 2026-04-28
 
 First containerised release. Brings the project into the
@@ -58,5 +69,6 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/cobdfamily/url2code/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/cobdfamily/url2code/commits/v1.0.0
