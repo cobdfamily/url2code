@@ -106,6 +106,13 @@ Notes:
 - `request.validations` defines which placeholder names callers may supply and enforces type checks.
 - `request.flags` defines approved request fields that render into CLI flags.
 - `uploads` maps multipart form file fields to command placeholders.
+- `uploads[*].name_template` (optional) — render the saved upload's
+  filename from the same value bag command args see (defaults +
+  validated overrides), instead of the default random hex token.
+  Useful when the wrapped CLI uses the on-disk filename as the
+  entry's identifier (`audfprint` does, for example). The
+  rendered name is validated against `[A-Za-z0-9][A-Za-z0-9._-]*`
+  to keep a request from smuggling a path traversal.
 - `output_files` defines placeholders that should be replaced with unique persistent output paths.
 - `filename_placeholder` exposes the generated filename separately when a script wants the basename instead of the full path.
 - `allow_extra_args` enables raw extra CLI args appended to the command.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import shlex
 import subprocess
@@ -11,21 +12,69 @@ from typing import Any
 
 from fastapi import HTTPException, UploadFile
 
-from .config import EndpointConfig, FlagConfig
+from .config import EndpointConfig, FlagConfig, UploadConfig
 from .models import ToolRequest, ToolResponse
 from .parser import OutputParseError, parse_output
 
 logger = logging.getLogger("cli_api.executor")
 
 
+# Names rendered from a YAML ``name_template`` must match this
+# pattern. Strict on purpose — the template field gets fed by
+# request data (form fields), and a relaxed regex would let a
+# malicious caller smuggle ``/`` or ``..`` into the upload path.
+_SAFE_UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 def _random_filename_token() -> str:
     return secrets.token_hex(32)
 
 
-def _write_upload(upload: UploadFile, temp_dir: str) -> str:
-    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+def _render_upload_name(
+    upload_config: UploadConfig,
+    template_values: dict[str, str],
+    suffix: str,
+) -> str:
+    """Render an upload's ``name_template`` with the same value
+    bag command args see (defaults + validated overrides), then
+    validate the result against the safe-name regex. Returns
+    ``<rendered><suffix>``. Falls back to the random-hex token
+    when ``name_template`` isn't set.
+    """
+    if upload_config.name_template is None:
+        return f"{_random_filename_token()}{suffix}"
+    try:
+        rendered = upload_config.name_template.format(**template_values)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"upload name_template for placeholder "
+                f"'{upload_config.placeholder}' references unknown "
+                f"field {exc}"
+            ),
+        ) from exc
+    if not _SAFE_UPLOAD_NAME_RE.match(rendered):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"upload name for placeholder "
+                f"'{upload_config.placeholder}' must match "
+                f"[A-Za-z0-9][A-Za-z0-9._-]*; got '{rendered}'"
+            ),
+        )
+    return f"{rendered}{suffix}"
+
+
+def _write_upload(
+    upload: UploadFile,
+    upload_config: UploadConfig,
+    template_values: dict[str, str],
+) -> str:
+    Path(upload_config.temp_dir).mkdir(parents=True, exist_ok=True)
     suffix = Path(upload.filename or "").suffix
-    path = Path(temp_dir) / f"{_random_filename_token()}{suffix}"
+    name = _render_upload_name(upload_config, template_values, suffix)
+    path = Path(upload_config.temp_dir) / name
     with path.open("wb") as handle:
         upload.file.seek(0)
         handle.write(upload.file.read())
@@ -177,12 +226,15 @@ def _stringify_template_value(value: Any) -> str:
     return str(value)
 
 
-def build_command(
-    endpoint: EndpointConfig,
-    request: ToolRequest,
-    upload_paths: dict[str, str],
-    output_values: dict[str, str],
-) -> list[str]:
+def _request_template_values(
+    endpoint: EndpointConfig, request: ToolRequest,
+) -> dict[str, str]:
+    """Build the partial value bag that's available *before*
+    uploads land on disk — defaults plus the resolved + validated
+    override values from the request. Used by the upload
+    name_template renderer (which fires before files are written)
+    and by build_command (which fills in upload_paths + outputs
+    on top of these)."""
     allowed = set(endpoint.request.allowed_overrides)
     disallowed = sorted(set(request.overrides) - allowed)
     if disallowed:
@@ -190,11 +242,24 @@ def build_command(
             status_code=400,
             detail=f"unsupported overrides for endpoint '{endpoint.name}': {', '.join(disallowed)}",
         )
-
     values: dict[str, str] = {
-        key: _stringify_template_value(value) for key, value in dict(endpoint.defaults).items()
+        key: _stringify_template_value(value)
+        for key, value in dict(endpoint.defaults).items()
     }
-    values.update({key: _stringify_template_value(value) for key, value in _resolved_override_values(endpoint, request).items()})
+    values.update({
+        key: _stringify_template_value(value)
+        for key, value in _resolved_override_values(endpoint, request).items()
+    })
+    return values
+
+
+def build_command(
+    endpoint: EndpointConfig,
+    request: ToolRequest,
+    upload_paths: dict[str, str],
+    output_values: dict[str, str],
+) -> list[str]:
+    values = _request_template_values(endpoint, request)
     values.update({key: _stringify_template_value(value) for key, value in upload_paths.items()})
     values.update({key: _stringify_template_value(value) for key, value in output_values.items()})
 
@@ -254,6 +319,10 @@ def execute_endpoint(
             output_values[output_file.filename_placeholder] = output_filename
 
     try:
+        # Resolve defaults + overrides up-front so the upload
+        # name_template (if any) can substitute request fields
+        # *before* the file lands on disk.
+        upload_template_values = _request_template_values(endpoint, request)
         for upload_config in endpoint.uploads:
             upload = uploads.get(upload_config.placeholder)
             if upload is None:
@@ -261,7 +330,9 @@ def execute_endpoint(
                     status_code=400,
                     detail=f"missing upload content for placeholder '{upload_config.placeholder}'",
                 )
-            upload_paths[upload_config.placeholder] = _write_upload(upload, upload_config.temp_dir)
+            upload_paths[upload_config.placeholder] = _write_upload(
+                upload, upload_config, upload_template_values,
+            )
 
         command = build_command(endpoint, request, upload_paths, output_values)
     except Exception:

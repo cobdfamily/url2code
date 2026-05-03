@@ -5,6 +5,53 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-05-03
+
+### Added
+- ``UploadConfig.name_template`` (optional). When set, the
+  uploaded file is saved to
+  ``<temp_dir>/<rendered template><.ext>`` instead of
+  ``<temp_dir>/<random hex><.ext>``. The template is
+  rendered against the same value bag the command args
+  see (defaults + validated overrides) — so a YAML like
+
+      uploads:
+        - field_name: audio
+          placeholder: audio
+          temp_dir: /tmp/uploads
+          name_template: "{id}"
+      request:
+        validations:
+          id: { type: text }
+
+  saves a request with form field ``id=tt0123456`` to
+  ``/tmp/uploads/tt0123456.<ext>``.
+
+  Wraps a use-case from cobdfamily/needle: the audfprint
+  CLI records the upload's on-disk filename as the entry
+  name in its fingerprint database, and the random hex
+  url2code used by default produced unstable / unusable
+  ids. ``name_template`` lets the operator preserve a
+  canonical id from the request.
+
+### Security
+- The rendered upload name is validated against
+  ``^[A-Za-z0-9][A-Za-z0-9._-]*$`` and rejects anything
+  with ``/``, ``..``, leading dots, spaces, etc. Without
+  this, a request smuggling a path-traversal value into
+  the template field could write to anywhere the
+  service has FS write permission. ``name_template``
+  unset preserves the previous random-hex behaviour
+  unchanged.
+
+### Tests
+- 14 new tests in ``tests/test_executor.py`` cover the
+  render helper (random fallback, simple substitution,
+  compound templates, missing-field 400, eight unsafe
+  inputs, typical canonical ids), plus an end-to-end
+  ``execute_endpoint`` test that confirms the templated
+  path is what the subprocess gets invoked with.
+
 ## [1.0.4] - 2026-05-03
 
 ### Tests
@@ -129,7 +176,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/cobdfamily/url2code/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/cobdfamily/url2code/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/cobdfamily/url2code/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/cobdfamily/url2code/compare/v1.0.1...v1.0.2

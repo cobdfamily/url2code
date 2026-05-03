@@ -532,7 +532,7 @@ wheels = [
 
 [[package]]
 name = "url2code"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

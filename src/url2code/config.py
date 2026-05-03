@@ -81,6 +81,14 @@ class UploadConfig(BaseModel):
     field_name: str
     placeholder: str
     temp_dir: str = "/tmp/url2code/uploads"
+    # When set, the saved upload uses this template (rendered with
+    # the same value bag command args see — defaults + validated
+    # overrides) instead of a random hex token. The original
+    # extension is still appended. The rendered name is validated
+    # against ``^[A-Za-z0-9][A-Za-z0-9._-]*$`` to keep a request
+    # from smuggling a path traversal in via a template field.
+    # Leave unset to keep the default random-hex naming.
+    name_template: str | None = None
 
 
 class OutputFileConfig(BaseModel):

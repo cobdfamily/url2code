@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from url2code.config import AppConfig, EndpointConfig, build_full_path, summarize_config
-from url2code.executor import _random_filename_token, build_command, execute_endpoint
+from url2code.config import AppConfig, EndpointConfig, UploadConfig, build_full_path, summarize_config
+from url2code.executor import (
+    _random_filename_token,
+    _render_upload_name,
+    build_command,
+    execute_endpoint,
+)
 from url2code.main import build_output_download_path
 from url2code.models import ToolRequest
 from fastapi import HTTPException
@@ -635,3 +640,137 @@ def test_execute_endpoint_text_mode_returns_raw_stdout(monkeypatch, tmp_path):
     assert response.parsed_output is None
     assert response.stdout == "raw text\n"
     assert response.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# upload name_template — render + sanitize + end-to-end
+# ---------------------------------------------------------------------------
+
+
+def _upload_config(**kw) -> UploadConfig:
+    base = {"field_name": "audio", "placeholder": "audio",
+            "temp_dir": "/tmp"}
+    return UploadConfig.model_validate({**base, **kw})
+
+
+def test_render_upload_name_returns_random_when_template_unset():
+    """Default behaviour preserved: ``name_template`` unset ->
+    random hex token + suffix. Length is 64 hex chars + suffix."""
+    name = _render_upload_name(_upload_config(), {}, ".wav")
+    stem = name.removesuffix(".wav")
+    assert name.endswith(".wav")
+    assert len(stem) == 64
+    assert all(c in "0123456789abcdef" for c in stem)
+
+
+def test_render_upload_name_substitutes_request_field():
+    """``{id}`` in the template draws from the value bag —
+    same dict the command args see (defaults + validated
+    overrides)."""
+    config = _upload_config(name_template="{id}")
+    assert _render_upload_name(config, {"id": "tt0123456"}, ".m4a") \
+        == "tt0123456.m4a"
+
+
+def test_render_upload_name_supports_compound_templates():
+    """Template can mix multiple fields and literal text."""
+    config = _upload_config(name_template="{category}-{id}")
+    assert _render_upload_name(
+        config, {"category": "films", "id": "tt0123456"}, ".m4a",
+    ) == "films-tt0123456.m4a"
+
+
+def test_render_upload_name_400s_on_missing_field():
+    """A template referencing a field that didn't validate
+    raises 400 with a useful detail — operators see this when
+    they typo a field name in the YAML."""
+    config = _upload_config(name_template="{missing}")
+    with pytest.raises(HTTPException) as exc:
+        _render_upload_name(config, {"id": "tt0123456"}, ".m4a")
+    assert exc.value.status_code == 400
+    assert "unknown field" in exc.value.detail.lower()
+
+
+@pytest.mark.parametrize("evil", [
+    "../etc/passwd",
+    "/abs/path",
+    "..",
+    ".hidden",
+    "with spaces",
+    "with/slash",
+    "with\\backslash",
+    "",
+])
+def test_render_upload_name_400s_on_unsafe_value(evil):
+    """The rendered name must match
+    ``[A-Za-z0-9][A-Za-z0-9._-]*``; anything else is rejected
+    with 400. This is the load-bearing safety check — without
+    it a client can choose any path on disk for the upload."""
+    config = _upload_config(name_template="{id}")
+    with pytest.raises(HTTPException) as exc:
+        _render_upload_name(config, {"id": evil}, ".m4a")
+    assert exc.value.status_code == 400
+
+
+def test_render_upload_name_accepts_typical_canonical_ids():
+    """Sanity — ids that look like IMDb tt-numbers, YouTube
+    video ids, IG media ids all pass."""
+    config = _upload_config(name_template="{id}")
+    for ok in ("tt0123456", "dQw4w9WgXcQ", "C8jK_3DpQYZ",
+               "ep.s01e02", "demo-1.0"):
+        out = _render_upload_name(config, {"id": ok}, ".m4a")
+        assert out == f"{ok}.m4a"
+
+
+def test_execute_endpoint_writes_upload_with_templated_name(
+    monkeypatch, tmp_path,
+):
+    """End-to-end: an endpoint that templates the upload name
+    on a request field actually saves the upload to that path
+    on disk, and the rendered path is what the subprocess gets
+    invoked with."""
+    from io import BytesIO
+
+    from fastapi import UploadFile
+
+    upload_dir = tmp_path / "uploads"
+    endpoint = EndpointConfig.model_validate({
+        "name": "stable-name",
+        "route": "/x",
+        "command": {
+            "executable": "tool",
+            "args": ["{audio}"],
+        },
+        "request": {
+            "validations": {"id": {"type": "text"}},
+        },
+        "uploads": [{
+            "field_name": "audio",
+            "placeholder": "audio",
+            "temp_dir": str(upload_dir),
+            "name_template": "{id}",
+        }],
+    })
+
+    captured: dict = {}
+
+    def fake_run(*args, **kwargs):
+        captured["argv"] = args[0]
+        return subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout="ok", stderr="",
+        )
+
+    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+
+    upload = UploadFile(
+        filename="raw-input.m4a",
+        file=BytesIO(b"fake audio bytes"),
+    )
+    request = ToolRequest(flag_values={"id": "tt0133093"})
+
+    execute_endpoint(endpoint, request, uploads={"audio": upload})
+
+    # The argv should reference the templated path, not a
+    # random-hex name.
+    [_executable, audio_path] = captured["argv"]
+    assert audio_path == str(upload_dir / "tt0133093.m4a")
