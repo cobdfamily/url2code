@@ -82,13 +82,22 @@ def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str)
 def create_app(config: AppConfig) -> FastAPI:
     app = FastAPI(
         title=config.api.title,
-        version="1.0.5",
+        version="1.0.6",
         redoc_url="/redocs",
     )
 
     @app.get("/", tags=["Health"])
     async def root() -> dict[str, str]:
-        return {"service": "url2code", "status": "ok", "version": app.version}
+        # ``service`` echoes the YAML's api.title so a downstream
+        # image (eg. cobdfamily/needle) reports its own identity in
+        # the liveness response, not "url2code". The title is
+        # required by FastAPI's OpenAPI assembly (asserts non-empty
+        # at app construction), so this is always a real string.
+        return {
+            "service": config.api.title,
+            "status": "ok",
+            "version": app.version,
+        }
 
     for endpoint in config.endpoints:
         register_endpoint(app, endpoint, config.api.default_root)

@@ -774,3 +774,50 @@ def test_execute_endpoint_writes_upload_with_templated_name(
     # random-hex name.
     [_executable, audio_path] = captured["argv"]
     assert audio_path == str(upload_dir / "tt0133093.m4a")
+
+
+# ---------------------------------------------------------------------------
+# / liveness — service field echoes the configured api.title
+# ---------------------------------------------------------------------------
+
+
+def _make_app(title: str | None):
+    """Tiny helper: build an AppConfig with the given api.title and
+    return a TestClient against the resulting FastAPI app."""
+    from fastapi.testclient import TestClient
+
+    from url2code.main import create_app
+
+    spec = {"endpoints": []}
+    if title is not None:
+        spec["api"] = {"title": title}
+    return TestClient(create_app(AppConfig.model_validate(spec)))
+
+
+def test_root_liveness_uses_api_title_as_service():
+    """Downstream consumers (eg. cobdfamily/needle) override
+    ``api.title`` in their tools.yaml. The / liveness response
+    should reflect that identity, not the upstream "url2code"
+    string. Without this, monitoring dashboards / load balancers
+    that pin off ``service`` see every consumer reporting as
+    url2code regardless of what's actually running."""
+    client = _make_app(title="needle")
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["service"] == "needle"
+    assert body["status"] == "ok"
+    assert body["version"]
+
+
+def test_root_liveness_uses_default_title_when_unset():
+    """A consumer that doesn't customize ``api.title`` gets
+    the AppConfig default (``"CLI Tool API"``) reported as
+    the service field, not the upstream ``"url2code"``
+    string. (FastAPI itself rejects an empty title at app
+    construction, so the only way to get a non-default title
+    is to set one explicitly.)"""
+    client = _make_app(title=None)
+    r = client.get("/")
+    body = r.json()
+    assert body["service"] == "CLI Tool API"

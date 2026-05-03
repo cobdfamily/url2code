@@ -322,6 +322,40 @@ docker build -t url2code .
 docker run --rm -p 8000:8000 -v "$(pwd)/config:/app/config" url2code
 ```
 
+## Building a downstream image
+
+A downstream image bakes in its own config + any extra CLI
+binaries the YAML wraps. Sample shape (used by
+`cobdfamily/needle`):
+
+```Dockerfile
+ARG URL2CODE_TAG=latest
+FROM kibble.apps.blindhub.ca/cobdfamily/url2code:${URL2CODE_TAG}
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends <your tool> \
+ && rm -rf /var/lib/apt/lists/*
+
+USER url2code
+RUN uv pip install --no-cache --python /app/.venv/bin/python <your-package>
+
+# REQUIRED: replace url2code's bundled example tools.yaml with
+# yours. The base image's URL2CODE_CONFIG defaults to
+# /app/config/tools.yaml, so this single COPY (which overwrites
+# every file the base image shipped under config/) is enough —
+# operators don't need to set URL2CODE_CONFIG themselves.
+COPY --chown=url2code:url2code config /app/config
+
+# CMD inherited from base (uvicorn url2code.main:app ...).
+```
+
+The `service` field returned by `GET /` (the liveness probe)
+echoes your `config/tools.yaml`'s `api.title`, so downstream
+consumers report their own identity to monitoring rather than
+"url2code". Set `api.title: needle` (or whatever) in your YAML
+and `curl /` will show it.
+
 ## License
 
 AGPL-3.0 — see `LICENSE`.

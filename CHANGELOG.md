@@ -5,6 +5,46 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-05-03
+
+### Fixed
+- ``GET /`` (the liveness probe) now reports the configured
+  ``api.title`` as the ``service`` field instead of the
+  hard-coded string ``"url2code"``. Downstream images that
+  set ``api.title: needle`` (or anything else) in their
+  ``tools.yaml`` will see their own identity in the
+  liveness response, which is what monitoring / load
+  balancers that pin off ``service`` expect.
+
+  FastAPI's OpenAPI assembly already asserts ``title`` is
+  non-empty at app construction, so the field is always a
+  real string. A consumer who doesn't set ``api.title`` in
+  their YAML gets the AppConfig default
+  (``"CLI Tool API"``).
+
+  Surfaced by cobdfamily/needle's first smoke test —
+  needle's liveness was reporting ``service=url2code``
+  despite the YAML title saying ``needle``. Fix is one
+  line in ``main.py``; two new tests in
+  ``test_executor.py`` lock the contract.
+
+### Added
+- README now documents the conventions a downstream
+  image needs to follow:
+
+  - ``COPY --chown=url2code:url2code config /app/config``
+    — required to override the base image's bundled
+    example ``tools.yaml`` with the consumer's own. A
+    sample Dockerfile in the new "Building a downstream
+    image" section shows the full shape including
+    ``apt-get`` + ``uv pip install`` lines.
+  - The ``api.title`` -> liveness ``service`` field
+    relationship is called out so consumers know what
+    string they're picking when they set the title.
+
+  Both were tribal knowledge before — needle hit the
+  config-not-copied trap on its first build.
+
 ## [1.0.5] - 2026-05-03
 
 ### Added
@@ -176,7 +216,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/cobdfamily/url2code/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/cobdfamily/url2code/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/cobdfamily/url2code/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/cobdfamily/url2code/compare/v1.0.2...v1.0.3

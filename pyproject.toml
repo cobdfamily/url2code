@@ -1,6 +1,6 @@
 [project]
 name = "url2code"
-version = "1.0.5"
+version = "1.0.6"
 description = "YAML-driven FastAPI wrapper for CLI tools"
 readme = "README.md"
 license = "AGPL-3.0"
