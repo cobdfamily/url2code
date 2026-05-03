@@ -82,13 +82,13 @@ def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str)
 def create_app(config: AppConfig) -> FastAPI:
     app = FastAPI(
         title=config.api.title,
-        version="1.0.2",
+        version="1.0.3",
         redoc_url="/redocs",
     )
 
     @app.get("/", tags=["Health"])
     async def root() -> dict[str, str]:
-        return {"service": "url2code", "status": "ok"}
+        return {"service": "url2code", "status": "ok", "version": app.version}
 
     for endpoint in config.endpoints:
         register_endpoint(app, endpoint, config.api.default_root)

@@ -5,6 +5,13 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-05-02
+
+### Added
+- Health endpoint at ``/`` now returns ``"version"``. Sourced
+  from ``app.version`` so it stays in lockstep with
+  pyproject.toml.
+
 ## [1.0.2] - 2026-05-02
 
 ### Fixed
