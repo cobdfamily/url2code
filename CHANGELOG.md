@@ -5,6 +5,48 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-05-03
+
+### Tests
+- Coverage push from 62% to 90%. The previous suite tested
+  ``build_command`` happy paths and the config validators
+  but skipped most of ``parser.py``, the
+  ``_validate_flag_value`` /``_coerce_override_value``
+  branches in ``executor.py``, and the multipart-form +
+  JSON-error paths in ``request_parser.py``.
+
+  Added 55 tests across:
+
+  - ``tests/test_parser.py`` (new): full coverage of
+    text / native_json / regex_json modes, regex flags
+    (IGNORECASE, MULTILINE, DOTALL), single + multiple
+    matches, no-match errors, unsupported-flag errors.
+  - ``tests/test_executor.py`` (augmented): every
+    type-coercion branch on flags and overrides
+    (number, bool, enum, text), bool valuePrefix
+    rendering, the build_command error paths
+    (extra_args toggling, missing placeholders, unknown
+    overrides), and execute_endpoint failure paths
+    (FileNotFoundError -> 500, OSError -> 500,
+    TimeoutExpired -> 504, non-zero return -> 502 with
+    structured detail, output parse error -> 502).
+  - ``tests/test_request_parser.py`` (augmented):
+    invalid / non-dict JSON bodies, empty body
+    falling back to query params, multipart
+    overrides / extra_args validation (invalid JSON,
+    wrong shape), missing-required-upload, upload
+    field arriving as a string, non-upload field
+    arriving as a file, and the
+    uploads-required-without-multipart path.
+
+  parser.py is now at 100% coverage, request_parser.py at
+  96%, executor.py at 85%.
+
+### Changed
+- ``tool.coverage.report.fail_under`` raised from 60 to 85
+  to reflect the new floor. The 5-point buffer absorbs
+  short-term drift when new code lands ahead of its tests.
+
 ## [1.0.3] - 2026-05-02
 
 ### Added
@@ -87,7 +129,9 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/cobdfamily/url2code/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/cobdfamily/url2code/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/cobdfamily/url2code/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/cobdfamily/url2code/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/cobdfamily/url2code/commits/v1.0.0

@@ -1,6 +1,6 @@
 [project]
 name = "url2code"
-version = "1.0.3"
+version = "1.0.4"
 description = "YAML-driven FastAPI wrapper for CLI tools"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -46,10 +46,11 @@ omit = [
 ]
 
 [tool.coverage.report]
-# 60% reflects what the current suite actually covers; the
-# previous 70 was aspirational and broke CI on every push since
-# v1.0.0. Adjust upward as new tests land.
-fail_under = 60
+# 85% gate. Real coverage is ~90% as of v1.0.4; the 5-point
+# buffer absorbs short-term drift when new code lands ahead of
+# its tests. Push this number up over time as the test suite
+# stays ahead of feature work.
+fail_under = 85
 show_missing = true
 skip_covered = false
 exclude_lines = [
