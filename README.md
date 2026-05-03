@@ -28,35 +28,40 @@ YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, ca
 ## Project Layout
 
 ```text
-app/
+src/url2code/
   config.py
   executor.py
   logging_config.py
   main.py
   models.py
   parser.py
+  request_parser.py
 config/
   tools.yaml
 Dockerfile
-requirements.txt
+pyproject.toml
 ```
 
 ## Run Locally
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+uv sync
+uv run url2code
+# or, with auto-reload during dev:
+uv run uvicorn url2code.main:app --reload
 ```
+
+Auto-generated docs at `/docs` and `/redocs`.
 
 To use a different YAML file:
 
 ```bash
-URL2CODE_CONFIG=/app/config/tools.yaml uvicorn app.main:app --host 0.0.0.0 --port 8000
+URL2CODE_CONFIG=/app/config/tools.yaml uv run url2code
 ```
 
-The container also includes `uv`, so additional Python CLI tools can be installed with commands such as `uv tool install ...` or `uv pip install --system ...`.
+The container also bundles `uv`, so additional Python CLI tools can
+be installed with commands such as `uv tool install ...` or
+`uv pip install --system ...`.
 
 ## YAML Configuration
 
@@ -267,13 +272,16 @@ Set `multiple: true` to collect all matches into a JSON array.
 
 ## Tests
 
-Install dependencies and run:
-
 ```bash
-pytest
+uv sync
+uv run pytest -q
+uv run pytest --cov   # with branch coverage
 ```
 
-The test suite covers request parsing precedence, approved flag validation, command rendering, and output placeholder handling.
+The test suite covers request parsing precedence, approved flag
+validation, command rendering, output placeholder handling, every
+type-coercion branch, and the executor failure / timeout paths.
+Branch-coverage gate is set at 85%.
 
 ## Config Validation
 
@@ -288,7 +296,25 @@ Startup logs also include a compact config summary listing each endpoint path pl
 
 ## Container
 
+A pre-built image is published to the kibble registry on every
+`git tag v*` (see [DEPLOYMENT.md](DEPLOYMENT.md) for the full
+production playbook):
+
+```bash
+docker pull kibble.apps.blindhub.ca/cobdfamily/url2code:latest
+docker run --rm -p 8000:8000 \
+  -v "$(pwd)/config:/app/config" \
+  -e URL2CODE_CONFIG=/app/config/tools.yaml \
+  kibble.apps.blindhub.ca/cobdfamily/url2code:latest
+```
+
+For local builds against a development checkout:
+
 ```bash
 docker build -t url2code .
 docker run --rm -p 8000:8000 -v "$(pwd)/config:/app/config" url2code
 ```
+
+## License
+
+AGPL-3.0 — see `LICENSE`.
