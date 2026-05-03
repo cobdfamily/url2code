@@ -25,13 +25,13 @@ builds and pushes the image on every `git tag v*`.
 Anonymous push to kibble, no secrets to configure.
 
 ```sh
-git tag -a v1.0.1 -m "Release 1.0.1"
-git push origin v1.0.1
+git tag -a v1.0.4 -m "Release 1.0.4"
+git push origin v1.0.4
 ```
 
 Within a couple of minutes:
 
-- `kibble.apps.blindhub.ca/cobdfamily/url2code:1.0.1`
+- `kibble.apps.blindhub.ca/cobdfamily/url2code:1.0.4`
 - `kibble.apps.blindhub.ca/cobdfamily/url2code:latest`
 
 ## Configure
@@ -42,7 +42,7 @@ uploads:
 ```yaml
 services:
   url2code:
-    image: kibble.apps.blindhub.ca/cobdfamily/url2code:1.0.0
+    image: kibble.apps.blindhub.ca/cobdfamily/url2code:1.0.4
     container_name: url2code
     restart: unless-stopped
     ports:
@@ -72,8 +72,13 @@ Behind your TLS reverse proxy, route
 ## Verify
 
 ```sh
-# Liveness
+# Liveness — returns the running version too:
+# {"service":"url2code","status":"ok","version":"1.0.4"}
 curl -fsS https://tools.cobd.ca/
+
+# Generated OpenAPI docs:
+#   https://tools.cobd.ca/docs    (Swagger UI)
+#   https://tools.cobd.ca/redocs  (ReDoc, trailing s)
 
 # Each endpoint declared in your config.yaml is now
 # reachable. Exact URL depends on its `route_root` and
@@ -85,12 +90,12 @@ curl -fsS https://tools.cobd.ca/
 ### Upgrading
 
 ```sh
-git tag -a v1.0.1 -m "Release 1.0.1"
-git push origin v1.0.1
+git tag -a v1.0.5 -m "Release 1.0.5"
+git push origin v1.0.5
 # CI builds and pushes the image.
 
 # Deploy host:
-sed -i 's|url2code:[^ ]*|url2code:1.0.1|' docker-compose.yml
+sed -i 's|url2code:[^ ]*|url2code:1.0.5|' docker-compose.yml
 docker compose pull
 docker compose up -d --no-deps url2code
 ```
