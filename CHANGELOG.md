@@ -5,6 +5,31 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-03
+
+### Added
+- `bin/cat-yaml-as-json` -- a small shell + python3
+  helper that reads a YAML file and emits a single-line
+  JSON document on stdout. Designed to plug into the
+  `native_json` output mode for catalog-discovery
+  endpoints; downstream images can `cat` a YAML catalog
+  through it as a one-line endpoint definition without
+  shipping the script themselves.
+
+  The helper lives at `/app/bin/cat-yaml-as-json` in the
+  runtime image. Downstream Dockerfiles that need it
+  no longer have to copy + chmod their own copy. Existing
+  downstream `bin/` directories still layer on top via
+  `COPY --chown=url2code:url2code bin /app/bin` --
+  Docker COPY adds, so per-service wrappers and the new
+  helper coexist.
+
+  Migration for existing downstream images that ship
+  their own `bin/cat-yaml-as-json`: delete the local
+  copy, drop the chmod for it from the Dockerfile, and
+  rebuild. tools.yaml endpoint definitions referencing
+  `/app/bin/cat-yaml-as-json` keep working unchanged.
+
 ## [1.0.6] - 2026-05-03
 
 ### Fixed
@@ -216,7 +241,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.6...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/cobdfamily/url2code/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/cobdfamily/url2code/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/cobdfamily/url2code/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/cobdfamily/url2code/compare/v1.0.3...v1.0.4

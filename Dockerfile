@@ -36,6 +36,17 @@ WORKDIR /app
 COPY --from=builder --chown=url2code:url2code /app /app
 COPY --chown=url2code:url2code config /app/config
 
+# Helper scripts shared by every url2code-pattern downstream
+# image. Today: cat-yaml-as-json -- reads a YAML file and
+# emits a JSON document on stdout, designed to plug into the
+# `native_json` output mode for catalog-discovery endpoints.
+# Downstream images can layer their own scripts into /app/bin
+# without clobbering these (Docker COPY adds, doesn't delete).
+COPY --chown=url2code:url2code bin /app/bin
+USER root
+RUN chmod 0755 /app/bin/cat-yaml-as-json
+USER url2code
+
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
