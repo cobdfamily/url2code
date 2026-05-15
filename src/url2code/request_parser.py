@@ -1,3 +1,17 @@
+"""Request normalisation for url2code endpoints.
+
+Builds a single ToolRequest from whatever shape the
+caller used: application/json body, multipart form,
+or query params. JSON-encoded form fields are
+re-parsed so a multipart caller can still send
+overrides as a nested dict.
+
+RESERVED_FIELDS lists names that have special
+meaning (overrides / extra_args / stdin); they bypass
+the flag-validation loop because they're not user-
+declared flags.
+"""
+
 from __future__ import annotations
 
 import json

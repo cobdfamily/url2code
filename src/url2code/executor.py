@@ -1,3 +1,19 @@
+"""Subprocess executor for url2code endpoints.
+
+Takes a request (placeholder values + uploaded files +
+approved flag values) plus an EndpointConfig, builds
+the final argv with shlex-safe escaping, writes any
+upload bytes to randomised temp paths under the
+upload dir, runs the CLI tool with a timeout, and
+hands the stdout/stderr to the configured parser.
+
+Security shape: every name rendered from a YAML
+name_template is whitelisted by a strict regex (see
+NAME_TEMPLATE_REGEX) before it touches the filesystem
+-- a relaxed regex would let a caller smuggle path
+traversal into the upload dir.
+"""
+
 from __future__ import annotations
 
 import logging

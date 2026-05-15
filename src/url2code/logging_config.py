@@ -1,3 +1,12 @@
+"""Structured JSON logging setup for url2code.
+
+JsonFormatter emits one JSON object per record so logs
+are friendly to ingest tools (Loki, ELK, datadog).
+configure_logging() pins the root logger format on
+boot; per-module loggers (cli_api, cli_api.executor,
+...) inherit from there.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,20 @@
+"""url2code FastAPI app.
+
+Boot flow:
+  1. Read YAML config from URL2CODE_CONFIG (or fall
+     back to config/tools.yaml).
+  2. For each EndpointConfig declared there, register
+     the HTTP route + any download routes for its
+     output_files placeholders.
+  3. Each request lands in parse_request() (body /
+     query / file uploads), then execute_endpoint()
+     (subprocess + parser), then ToolResponse.
+
+URL2CODE_CONFIG path is the operator's hook -- one
+url2code image, many YAML configs, one container per
+tool surface.
+"""
+
 from __future__ import annotations
 
 import os

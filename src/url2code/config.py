@@ -1,3 +1,20 @@
+"""YAML-driven config loader + pydantic schemas for
+url2code.
+
+Each url2code instance reads a config file at startup
+that declares one or more endpoints. The schemas in
+this module are the contract the YAML must match -- a
+malformed config fails validation at boot, not at
+request time.
+
+Top-level: AppConfig wraps ApiConfig (FastAPI metadata)
+plus a list of EndpointConfig entries. Each endpoint
+declares its CLI surface, allowed overrides, output
+handling, and parser. load_config() does parse +
+validation; summarize_config() emits a one-line
+debug summary for the boot log.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

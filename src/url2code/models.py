@@ -1,3 +1,12 @@
+"""Per-request models passed across module boundaries.
+
+ToolRequest is the normalised input shape coming out
+of request_parser; ToolResponse is the JSON envelope
+returned to the caller. Keeping them in their own
+file means executor.py + main.py don't depend on
+each other for the data shape.
+"""
+
 from __future__ import annotations
 
 from typing import Any

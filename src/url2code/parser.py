@@ -1,3 +1,17 @@
+"""Stdout-to-JSON parser for url2code endpoints.
+
+Two modes per the YAML OutputConfig:
+  json  -- the CLI already emits JSON; we just
+           json.loads it
+  regex -- named-capture groups against the raw stdout
+           produce a dict per match; the YAML lists
+           which flags to enable (IGNORECASE etc.)
+
+OutputParseError surfaces a parser failure as a
+clean HTTP 502 in the route handler rather than a
+500 with a Traceback.
+"""
+
 from __future__ import annotations
 
 import json
