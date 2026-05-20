@@ -67,6 +67,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Attach a CycloneDX 1.6 SBOM alongside the image in
+      # kibble via the OCI 1.1 referrers API (`oras attach`).
+      # Mirrors trunk v5.11+'s release flow + dispatch +
+      # brian; see state-of-the-stack-2026-05-20 Part X
+      # step 2 for the rationale.
+      - name: install uv (for SBOM generation)
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+          enable-cache: true
+      - name: sync dependencies
+        run: uv sync --frozen
+      - name: generate CycloneDX SBOM
+        run: |
+          uv tool install cyclonedx-bom
+          cyclonedx-py environment .venv/bin/python \
+            --pyproject pyproject.toml \
+            --output-reproducible \
+            --output-file bom.cdx.json
+      - name: install oras
+        uses: oras-project/setup-oras@v1
+      - name: attach SBOM as OCI 1.1 referrer
+        run: |
+          oras attach \
+            --artifact-type application/vnd.cyclonedx+json \
+            --plain-http \
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }} \
+            bom.cdx.json:application/vnd.cyclonedx+json
+
       - name: summary
         run: |
           {
@@ -74,4 +103,10 @@ jobs:
             echo ""
             echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }}\`"
             echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE }}:latest\`"
+            echo ""
+            echo "### SBOM attached"
+            echo ""
+            echo "- artifact-type \`application/vnd.cyclonedx+json\`"
+            echo "- discover via:"
+            echo "  \`oras discover --plain-http ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.ver.outputs.version }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
