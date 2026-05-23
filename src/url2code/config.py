@@ -27,7 +27,14 @@ from pydantic import BaseModel, Field, model_validator
 class ApiConfig(BaseModel):
     default_root: str = "/"
     title: str = "CLI Tool API"
-    version: str = "0.1.0"
+    # Optional service-specific version surfaced on / liveness +
+    # OpenAPI metadata. None falls back to the url2code engine
+    # version (see ENGINE_VERSION in main.py). Downstream images
+    # like cobdfamily/needle set this to their own tag so a
+    # `GET /` response reports the consumer's identity, not the
+    # engine's. Pinned as None (not "0.1.0") so an unset YAML
+    # value is distinguishable from an explicit "0.1.0" choice.
+    version: str | None = None
 
 
 class LoggingConfig(BaseModel):

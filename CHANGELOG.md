@@ -5,6 +5,32 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-05-22
+
+### Changed
+- `ApiConfig.version` is now `Optional[str]` (default
+  `None`) instead of `"0.1.0"`. When unset in YAML, the /
+  liveness response reports the hardcoded
+  `ENGINE_VERSION` (the url2code engine's own version).
+  When set, the response reports the consumer's
+  identity.
+
+  Before: every downstream image (cobdfamily/needle,
+  cobdfamily/pandoc, ...) reported url2code's
+  hardcoded `"1.0.7"` regardless of what consumer was
+  actually running. Operators couldn't tell which
+  build of needle was up by hitting `/`.
+
+  After: needle (and any other consumer) sets
+  `api.version: "0.2.0"` (or whatever its current tag
+  is) in its tools.yaml. Liveness reports that. Falls
+  back to the engine version for the no-override path.
+
+### Tests
+- Two new tests in `test_executor.py` covering the
+  override behaviour: explicit `api.version` wins;
+  unset `api.version` reports the engine version.
+
 ## [1.0.7] - 2026-05-03
 
 ### Added

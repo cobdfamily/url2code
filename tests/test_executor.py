@@ -821,3 +821,51 @@ def test_root_liveness_uses_default_title_when_unset():
     r = client.get("/")
     body = r.json()
     assert body["service"] == "CLI Tool API"
+
+
+# ---------------------------------------------------------------------------
+# / liveness -- version field honours api.version when set
+# ---------------------------------------------------------------------------
+
+
+def _make_app_with(title: str | None = None, version: str | None = None):
+    """Build an AppConfig with optional api.title and api.version
+    and return a TestClient. None for either field means "don't
+    set this in the YAML"."""
+    from fastapi.testclient import TestClient
+
+    from url2code.main import create_app
+
+    spec: dict = {"endpoints": []}
+    api: dict = {}
+    if title is not None:
+        api["title"] = title
+    if version is not None:
+        api["version"] = version
+    if api:
+        spec["api"] = api
+    return TestClient(create_app(AppConfig.model_validate(spec)))
+
+
+def test_root_liveness_reports_engine_version_when_api_version_unset():
+    """No api.version in YAML -> the engine version (the
+    hardcoded ENGINE_VERSION in main.py) is reported. This is
+    the default path used by url2code itself when no consumer
+    image is involved."""
+    from url2code.main import ENGINE_VERSION
+
+    client = _make_app_with(title="some-consumer")
+    body = client.get("/").json()
+    assert body["version"] == ENGINE_VERSION
+
+
+def test_root_liveness_honours_explicit_api_version():
+    """Downstream images (cobdfamily/needle, etc.) set
+    api.version to their own image tag so the liveness
+    response carries the consumer's identity. Without this,
+    /v1/admin/categories consumers can't tell which build of
+    the consumer is actually running -- only which engine."""
+    client = _make_app_with(title="needle", version="0.2.1")
+    body = client.get("/").json()
+    assert body["version"] == "0.2.1"
+    assert body["service"] == "needle"

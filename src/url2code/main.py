@@ -96,10 +96,24 @@ def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str)
     )
 
 
+ENGINE_VERSION = "1.0.8"
+"""Hard-coded url2code engine version.
+
+Surfaced on / liveness when no api.version is set in the
+YAML. Downstream images (cobdfamily/needle, etc.) override
+this by setting their own api.version so the liveness
+response carries the consumer's identity.
+"""
+
+
 def create_app(config: AppConfig) -> FastAPI:
+    # api.version is Optional[str]; None means "use the engine
+    # version". Downstream images bump api.version per release
+    # so / liveness reports the consumer's own tag, not url2code's.
+    reported_version = config.api.version or ENGINE_VERSION
     app = FastAPI(
         title=config.api.title,
-        version="1.0.7",
+        version=reported_version,
         redoc_url="/redocs",
     )
 
