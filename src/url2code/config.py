@@ -50,6 +50,28 @@ class RegexOutputConfig(BaseModel):
 class OutputConfig(BaseModel):
     mode: Literal["text", "native_json", "regex_json"] = "text"
     regex: RegexOutputConfig | None = None
+    # Optional response-shape template. When set, the route
+    # handler renders this template against the run context
+    # (parsed_output, stdout, stderr, request fields, static
+    # values...) and returns the rendered shape as the
+    # response body INSTEAD of the default ToolResponse
+    # envelope. See templating.py for the substitution
+    # rules. Endpoints that omit `template` keep the classic
+    # envelope -- so every pre-1.1 url2code service works
+    # without YAML edits.
+    template: Any | None = None
+    # Content-Type for templated responses. Defaults to
+    # application/json; downstream surfaces with their own
+    # media type (Redfish uses application/redfish+json,
+    # HAL uses application/hal+json, etc.) override here.
+    # Ignored when `template` is unset.
+    template_content_type: str = "application/json"
+    # Static values surfaced to the template under
+    # `static.<key>`. Useful for OData/Redfish boilerplate
+    # (Id strings, base URLs) that's identical across every
+    # request to the endpoint and doesn't belong in the
+    # parsed CLI output. Ignored when `template` is unset.
+    template_static: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_regex_requirement(self) -> "OutputConfig":

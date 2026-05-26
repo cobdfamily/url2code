@@ -242,15 +242,19 @@ def _stringify_template_value(value: Any) -> str:
     return str(value)
 
 
-def _request_template_values(
+def request_template_values(
     endpoint: EndpointConfig, request: ToolRequest,
 ) -> dict[str, str]:
     """Build the partial value bag that's available *before*
     uploads land on disk — defaults plus the resolved + validated
     override values from the request. Used by the upload
-    name_template renderer (which fires before files are written)
-    and by build_command (which fills in upload_paths + outputs
-    on top of these)."""
+    name_template renderer (which fires before files are written),
+    by build_command (which fills in upload_paths + outputs on
+    top of these), and by main.py's route handler when assembling
+    the response-template context (so the same request-side
+    values that drove the CLI args are reachable from the
+    response template under `request.<name>`).
+    """
     allowed = set(endpoint.request.allowed_overrides)
     disallowed = sorted(set(request.overrides) - allowed)
     if disallowed:
@@ -275,7 +279,7 @@ def build_command(
     upload_paths: dict[str, str],
     output_values: dict[str, str],
 ) -> list[str]:
-    values = _request_template_values(endpoint, request)
+    values = request_template_values(endpoint, request)
     values.update({key: _stringify_template_value(value) for key, value in upload_paths.items()})
     values.update({key: _stringify_template_value(value) for key, value in output_values.items()})
 
@@ -338,7 +342,7 @@ def execute_endpoint(
         # Resolve defaults + overrides up-front so the upload
         # name_template (if any) can substitute request fields
         # *before* the file lands on disk.
-        upload_template_values = _request_template_values(endpoint, request)
+        upload_template_values = request_template_values(endpoint, request)
         for upload_config in endpoint.uploads:
             upload = uploads.get(upload_config.placeholder)
             if upload is None:

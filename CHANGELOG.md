@@ -5,6 +5,59 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-26
+
+### Added
+- **Optional response-shape templating.** New
+  `output.template` field on each endpoint config.
+  When set, the route handler renders that JSON-shape
+  template against the run context and returns the
+  result as the response body, instead of the default
+  `ToolResponse` envelope. Endpoints without
+  `output.template` keep the classic envelope --
+  brl, needle, outofoffice, and pandoc all keep
+  working unchanged.
+
+  Substitution rules:
+    * Whole-leaf form `"{path.to.value}"` -- the leaf
+      is replaced with the native value at that path
+      (type preserved: int stays int, list stays
+      list).
+    * Embedded form `"prefix-{x}-{y}-suffix"` -- each
+      `{path}` is substituted with the stringified
+      value; the result is a string.
+    * Dicts and lists in the template render
+      recursively.
+    * Path resolution walks dicts by key and objects
+      by attribute -- pydantic models work without
+      `model_dump()` first.
+    * Unknown paths raise `TemplateRenderError`,
+      surfaced as a 500 with the template error AND
+      the raw envelope in the response body. Loud
+      failure beats silent half-correct output.
+
+- New `output.template_content_type` field (default
+  `application/json`). Downstream surfaces with their
+  own media type (Redfish uses
+  `application/redfish+json`, HAL uses
+  `application/hal+json`) override here.
+
+- New `output.template_static` field (default `{}`).
+  YAML-side dict of fixed values surfaced under
+  `static.<key>` in templates -- OData / Redfish
+  boilerplate that doesn't belong in `parsed_output`.
+
+### Internal
+- `_request_template_values` in executor.py renamed
+  to public `request_template_values` so main.py can
+  build the response-template context without
+  reaching into a private name.
+
+### Engine version
+- `ENGINE_VERSION` bumps `1.0.8 -> 1.1.0`. Additive
+  feature, no breaking changes for existing
+  consumers.
+
 ## [1.0.8] - 2026-05-22
 
 ### Changed

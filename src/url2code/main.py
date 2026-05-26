@@ -22,13 +22,14 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from .config import AppConfig, EndpointConfig, build_full_path, load_config, summarize_config
-from .executor import execute_endpoint
+from .executor import execute_endpoint, request_template_values
 from .logging_config import configure_logging
 from .models import ToolResponse
 from .request_parser import parse_request
+from .templating import TemplateRenderError, render_template
 
 CONFIG_ENV_VAR = "URL2CODE_CONFIG"
 DEFAULT_CONFIG_PATH = "config/tools.yaml"
@@ -74,29 +75,114 @@ def register_download_routes(app: FastAPI, endpoint: EndpointConfig, endpoint_pa
 
     return download_templates
 
+def _build_template_context(
+    endpoint: EndpointConfig,
+    tool_request,
+    response: ToolResponse,
+) -> dict:
+    """Assemble the run-context dict the response template
+    resolves paths against. The two big subtrees are
+    ``parsed_output`` (whatever the YAML's regex / native_json
+    parser produced) and ``request`` (the same defaults +
+    overrides + flag values that drove the CLI args). The
+    flat top-level keys mirror ToolResponse fields so a
+    template can lift `duration_ms` or `exit_code` straight
+    into its response shape if it wants to.
+
+    `static` is whatever the YAML's `output.template_static`
+    declares -- a place to park OData / Redfish boilerplate
+    that's identical per request and shouldn't bloat
+    `parsed_output`.
+    """
+    return {
+        "parsed_output": response.parsed_output,
+        "stdout":        response.stdout,
+        "stderr":        response.stderr,
+        "duration_ms":   response.duration_ms,
+        "exit_code":     response.exit_code,
+        "endpoint":      response.endpoint,
+        "command":       response.command,
+        "request":       request_template_values(
+                              endpoint, tool_request),
+        "static":        endpoint.output.template_static,
+    }
+
+
 def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str) -> None:
     path = build_full_path(default_root, endpoint)
     download_templates = register_download_routes(app, endpoint, path)
+    has_template = endpoint.output.template is not None
 
-    async def handler(request: Request) -> ToolResponse:
+    async def handler(request: Request):
         tool_request, uploads = await parse_request(request, endpoint)
-        return execute_endpoint(endpoint, tool_request, uploads, download_templates)
+        response = execute_endpoint(
+            endpoint, tool_request, uploads, download_templates,
+        )
+        if not has_template:
+            # Classic shape: FastAPI serializes the
+            # ToolResponse via the registered response_model.
+            return response
+        # Templated shape: render against the run context and
+        # ship the result with the configured Content-Type.
+        # A path miss is a 500 with both the template error
+        # AND the raw envelope, so operators can see what
+        # the CLI actually returned alongside the mismatch.
+        context = _build_template_context(
+            endpoint, tool_request, response,
+        )
+        try:
+            body = render_template(endpoint.output.template, context)
+        except TemplateRenderError as exc:
+            logger.error(
+                "Response template rendering failed",
+                extra={
+                    "endpoint": endpoint.name,
+                    "error": str(exc),
+                    "status_code": 500,
+                },
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "response template rendering failed",
+                    "error": str(exc),
+                    "envelope": response.model_dump(),
+                },
+            ) from exc
+        return JSONResponse(
+            content=body,
+            media_type=endpoint.output.template_content_type,
+        )
 
-    app.add_api_route(
-        path=path,
-        endpoint=handler,
-        methods=[endpoint.method],
-        name=endpoint.name,
-        description=endpoint.description,
-        response_model=ToolResponse,
-    )
+    # Endpoints with a template have a free-form response
+    # shape, so the ToolResponse response_model would either
+    # double-validate (and fail) or strip fields. Skip the
+    # response_model on those; FastAPI's OpenAPI for those
+    # routes lands as `application/json` (or the custom
+    # Content-Type) with no schema, which is honest -- the
+    # shape is whatever the YAML template says it is.
+    add_route_kwargs: dict = {
+        "path":        path,
+        "endpoint":    handler,
+        "methods":     [endpoint.method],
+        "name":        endpoint.name,
+        "description": endpoint.description,
+    }
+    if not has_template:
+        add_route_kwargs["response_model"] = ToolResponse
+    app.add_api_route(**add_route_kwargs)
     logger.info(
         "Registered endpoint",
-        extra={"endpoint": endpoint.name, "route": path, "status_code": 200},
+        extra={
+            "endpoint":    endpoint.name,
+            "route":       path,
+            "templated":   has_template,
+            "status_code": 200,
+        },
     )
 
 
-ENGINE_VERSION = "1.0.8"
+ENGINE_VERSION = "1.1.0"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the

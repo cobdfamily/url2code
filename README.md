@@ -21,6 +21,7 @@ YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, ca
 - Download URLs for generated output files
 - Optional `extra_args` passthrough for tools that need arbitrary flags
 - Native JSON parsing or regex-to-JSON parsing for text output
+- **Optional response-shape templating** (see below) -- reshape the response body to whatever JSON your consumer needs (Redfish, HAL, custom schema). Endpoints without a template keep the classic envelope.
 - Structured JSON logs for success, failures, parsing errors, and timeouts
 - Lightweight container via `python:3.12-slim`
 - `uv` included in the container for installing Python-distributed CLI tools
@@ -117,6 +118,9 @@ Notes:
 - `filename_placeholder` exposes the generated filename separately when a script wants the basename instead of the full path.
 - `allow_extra_args` enables raw extra CLI args appended to the command.
 - `output.mode` can be `text`, `native_json`, or `regex_json`.
+- `output.template` (optional) — reshape the response body to a custom JSON shape; see [Response templates](#response-templates).
+- `output.template_content_type` (optional, default `application/json`) — Content-Type header for templated responses (e.g. `application/redfish+json`).
+- `output.template_static` (optional) — YAML-side dict of fixed values surfaced under `static.<key>` in templates.
 
 Validation types:
 
@@ -138,6 +142,104 @@ Request field precedence:
 - Explicit `overrides` entries win for command template placeholders
 - Otherwise JSON body or multipart form fields are used
 - Query params are used only when the body/form does not provide that field
+
+## Response templates
+
+By default, every url2code endpoint returns the same
+`ToolResponse` JSON envelope:
+
+```json
+{
+  "endpoint":      "dog-walk",
+  "command":       ["dog", "walk"],
+  "exit_code":     0,
+  "duration_ms":   42,
+  "parsed_output": null,
+  "output_files":  {},
+  "stdout":        "walking\n",
+  "stderr":        ""
+}
+```
+
+That's the right shape when the caller is a script
+that wants the raw CLI output plus metadata. When the
+caller is a downstream service with its own schema
+(Redfish, HAL, JSON-LD, a custom contract), you can
+reshape the response body with `output.template`.
+
+Set the template to whatever JSON shape you want the
+response to be. Strings inside get placeholder
+substitution:
+
+```yaml
+- name: power-status
+  route: /Systems/1
+  method: GET
+  command:
+    executable: /app/bin/ipmi-power-status-json
+  output:
+    mode: native_json
+    template_content_type: application/redfish+json
+    template_static:
+      id:   "1"
+      type: "#ComputerSystem.v1_0_0.ComputerSystem"
+    template:
+      "@odata.id":   "/redfish/v1/Systems/{static.id}"
+      "@odata.type": "{static.type}"
+      Id:            "{static.id}"
+      PowerState:    "{parsed_output.state}"
+```
+
+A `GET /Systems/1` against that endpoint shells out to
+`ipmi-power-status-json` (which returns
+`{"state":"On"}`), then emits:
+
+```json
+{
+  "@odata.id":   "/redfish/v1/Systems/1",
+  "@odata.type": "#ComputerSystem.v1_0_0.ComputerSystem",
+  "Id":          "1",
+  "PowerState":  "On"
+}
+```
+
+with `Content-Type: application/redfish+json`. No
+`ToolResponse` envelope -- the response body IS the
+template.
+
+### Substitution rules
+
+- **Whole-leaf** `"{path.to.value}"` — the leaf is
+  replaced with the **native value** at that path:
+  int stays int, list stays list, dict stays dict.
+- **Embedded** `"prefix-{x}-{y}-suffix"` — each
+  `{path}` is substituted with the stringified value;
+  the result is always a string.
+- Dicts and lists render recursively.
+- Non-string leaves (`true`, `42`, `null`) pass
+  through unchanged.
+
+### Available paths
+
+| Path                        | Source                              |
+|-----------------------------|-------------------------------------|
+| `parsed_output.<field>`     | Whatever the parser produced.       |
+| `static.<key>`              | `output.template_static` YAML dict. |
+| `request.<name>`            | Defaults + validated overrides + flag values for this request. |
+| `stdout`, `stderr`          | Raw CLI text.                       |
+| `exit_code`                 | CLI exit code (int).                |
+| `duration_ms`               | Wall time of the CLI run.           |
+| `endpoint`                  | Endpoint name.                      |
+| `command`                   | The fully rendered argv (list).     |
+
+### Errors
+
+A typo'd path raises during render and the route
+returns 500 with both the template error AND the raw
+`ToolResponse` envelope in the body, so operators can
+see what the CLI actually returned alongside the
+template mismatch. Loud failures beat silent half-
+correct output.
 
 ## Request Format
 
