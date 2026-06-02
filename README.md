@@ -26,6 +26,7 @@ YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, ca
 - Optional per-endpoint rate limiting and request-size caps (`429` / `413`)
 - Split liveness (`/`) and readiness (`/readyz`) probes; graceful shutdown drain
 - Prometheus `/metrics` (requests, in-flight, CLI-duration histogram) — no extra deps
+- Optional OpenTelemetry tracing (OTLP/HTTP), off unless an endpoint is configured
 - Lightweight container via `python:3.12-slim`
 - `uv` included in the container for installing Python-distributed CLI tools
 
@@ -490,6 +491,23 @@ The infra routes (`/`, `/readyz`, `/metrics`) aren't counted.
 > Counters are per process. With multiple uvicorn workers each
 > worker exposes its own series — scrape each, or aggregate at
 > the collector. Same multi-worker caveat as the rate limiter.
+
+## Tracing
+
+Optional OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` (or
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) and the engine exports spans
+over OTLP/HTTP:
+
+- a **request span** per call — `<METHOD> <path>`, with
+  `url2code.endpoint`, `http.request.method`, and
+  `http.response.status_code`;
+- a child **`cli.execute`** span — `cli.executable` (the binary,
+  never the request-derived argv) and `cli.exit_code`.
+
+Configure via the standard `OTEL_*` env vars (endpoint, headers,
+resource attributes). With no endpoint set — or
+`OTEL_SDK_DISABLED=true` — spans are the OpenTelemetry no-op and
+cost essentially nothing.
 
 ## Container
 

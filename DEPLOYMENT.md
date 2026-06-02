@@ -146,6 +146,12 @@ For a permanent wire-in, fold the install into a
 custom downstream image that derives from the kibble
 image and adds the extra deps.
 
+### Tracing (optional)
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` on the container to export spans
+to your collector (OTLP/HTTP); see the README "Tracing" section
+for the span shape. Unset means no tracing and no overhead.
+
 ### Backups
 
 What must persist:

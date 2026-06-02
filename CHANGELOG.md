@@ -5,6 +5,35 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-01
+
+### Added
+- **Optional OpenTelemetry tracing.** When
+  `OTEL_EXPORTER_OTLP_ENDPOINT` (or
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set, the engine exports
+  spans over OTLP/HTTP: a request span per call (`<METHOD> <path>`,
+  attributes `url2code.endpoint`, `http.request.method`,
+  `http.response.status_code`) and a child `cli.execute` span
+  (attributes `cli.executable`, `cli.exit_code`). With no endpoint
+  set — or `OTEL_SDK_DISABLED=true` — spans are the OTel API no-op
+  and cost essentially nothing. Standard `OTEL_*` env vars
+  configure endpoint / headers / resource the usual way.
+
+### Changed
+- `ENGINE_VERSION` `1.5.0 -> 1.6.0`.
+- New `url2code.otel` module; the route handler opens the request
+  and `cli.execute` spans.
+- **First runtime dependencies added since 1.0.0:**
+  `opentelemetry-api`, `opentelemetry-sdk`,
+  `opentelemetry-exporter-otlp-proto-http`. Everything before this
+  stayed stdlib + FastAPI; tracing is the feature that justified
+  the deps.
+
+### Compatibility
+- Tracing is off unless an OTLP endpoint is configured, so
+  behavior is unchanged for every existing consumer. Opt in by
+  setting the env on the container.
+
 ## [1.5.0] - 2026-06-01
 
 ### Added
@@ -448,7 +477,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/cobdfamily/url2code/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/cobdfamily/url2code/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/cobdfamily/url2code/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/cobdfamily/url2code/compare/v1.1.1...v1.3.0

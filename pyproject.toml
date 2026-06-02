@@ -1,6 +1,6 @@
 [project]
 name = "url2code"
-version = "1.5.0"
+version = "1.6.0"
 description = "YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML; supports request-time argument overrides + regex named-capture-group output parsing."
 readme = "README.md"
 license = "AGPL-3.0"
@@ -11,6 +11,11 @@ dependencies = [
   "pydantic>=2.10",
   "pyyaml>=6",
   "python-multipart>=0.0.20",
+  # Tracing (1.6.0). API is always imported; the SDK + OTLP/HTTP
+  # exporter are only exercised when an OTLP endpoint is set.
+  "opentelemetry-api>=1.27",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-http>=1.27",
 ]
 
 [project.scripts]

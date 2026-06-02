@@ -40,6 +40,7 @@ from .executor import execute_endpoint, request_template_values
 from .logging_config import configure_logging
 from .metrics import Metrics
 from .models import ToolResponse
+from .otel import configure_tracing, get_tracer
 from .ratelimit import RateLimiter, client_ip
 from .request_parser import parse_request
 from .templating import TemplateRenderError, render_template
@@ -47,6 +48,12 @@ from .templating import TemplateRenderError, render_template
 CONFIG_ENV_VAR = "URL2CODE_CONFIG"
 DEFAULT_CONFIG_PATH = "config/tools.yaml"
 logger = logging.getLogger("cli_api")
+
+# Module-level tracer. get_tracer() returns the OTel API proxy
+# tracer, which resolves to the real provider once
+# configure_tracing() installs one (or stays no-op if tracing is
+# off), so caching it here is safe.
+_tracer = get_tracer()
 
 
 def build_output_download_path(endpoint_path: str, output_placeholder: str, filename: str = "{filename}") -> str:
@@ -139,100 +146,110 @@ def register_endpoint(
     rate_limit = endpoint_limits.rate_limit
 
     async def handler(request: Request):
-        # Metrics (1.5.0): count every request by final status,
-        # track in-flight, and observe CLI wall time when the
-        # command actually ran. The registry lives on app.state.
+        # Metrics (1.5.0) + tracing (1.6.0). Counters/timing live on
+        # app.state.metrics; a request span (with a child cli.execute
+        # span) is opened on the module tracer — a no-op unless an
+        # OTLP endpoint is configured.
         metrics: Metrics = request.app.state.metrics
         metrics.inc_inflight(endpoint.name)
         status_code = 200
         duration_seconds: float | None = None
-        try:
-            # Abuse-resistance gates (1.3.0). Evaluated before the
-            # request body is read, so an oversize upload is rejected
-            # with 413 before it ever touches disk.
-            if endpoint_limits.max_request_bytes is not None:
-                content_length = request.headers.get("content-length")
-                if content_length is not None:
-                    try:
-                        declared = int(content_length)
-                    except ValueError:
-                        declared = None
-                    if declared is not None and declared > endpoint_limits.max_request_bytes:
-                        raise HTTPException(
-                            status_code=413,
-                            detail=(
-                                f"request body {declared} bytes exceeds the "
-                                f"{endpoint_limits.max_request_bytes}-byte limit "
-                                f"for endpoint '{endpoint.name}'"
-                            ),
-                        )
-            if rate_limit is not None and limiter is not None:
-                allowed, retry_after = limiter.check(
-                    f"{endpoint.name}:{client_ip(request)}",
-                    rate_limit.requests,
-                    rate_limit.window_seconds,
-                )
-                if not allowed:
-                    # Retry-After is whole seconds, min 1 — a 0 would
-                    # invite an immediate retry that just bounces again.
-                    raise HTTPException(
-                        status_code=429,
-                        detail=f"rate limit exceeded for endpoint '{endpoint.name}'",
-                        headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
-                    )
-            tool_request, uploads = await parse_request(request, endpoint)
-            response = execute_endpoint(
-                endpoint, tool_request, uploads, download_templates,
-            )
-            duration_seconds = response.duration_ms / 1000.0
-            if not has_template:
-                # Classic shape: FastAPI serializes the
-                # ToolResponse via the registered response_model.
-                return response
-            # Templated shape: render against the run context and
-            # ship the result with the configured Content-Type.
-            # A path miss is a 500 with both the template error
-            # AND the raw envelope, so operators can see what
-            # the CLI actually returned alongside the mismatch.
-            context = _build_template_context(
-                endpoint, tool_request, response,
-            )
+        with _tracer.start_as_current_span(f"{endpoint.method} {path}") as span:
+            span.set_attribute("url2code.endpoint", endpoint.name)
+            span.set_attribute("http.request.method", endpoint.method)
             try:
-                body = render_template(endpoint.output.template, context)
-            except TemplateRenderError as exc:
-                logger.error(
-                    "Response template rendering failed",
-                    extra={
-                        "endpoint": endpoint.name,
-                        "error": str(exc),
-                        "status_code": 500,
-                    },
+                # Abuse-resistance gates (1.3.0). Evaluated before the
+                # request body is read, so an oversize upload is
+                # rejected with 413 before it ever touches disk.
+                if endpoint_limits.max_request_bytes is not None:
+                    content_length = request.headers.get("content-length")
+                    if content_length is not None:
+                        try:
+                            declared = int(content_length)
+                        except ValueError:
+                            declared = None
+                        if declared is not None and declared > endpoint_limits.max_request_bytes:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=(
+                                    f"request body {declared} bytes exceeds the "
+                                    f"{endpoint_limits.max_request_bytes}-byte limit "
+                                    f"for endpoint '{endpoint.name}'"
+                                ),
+                            )
+                if rate_limit is not None and limiter is not None:
+                    allowed, retry_after = limiter.check(
+                        f"{endpoint.name}:{client_ip(request)}",
+                        rate_limit.requests,
+                        rate_limit.window_seconds,
+                    )
+                    if not allowed:
+                        # Retry-After is whole seconds, min 1 — a 0
+                        # would invite an immediate retry that bounces.
+                        raise HTTPException(
+                            status_code=429,
+                            detail=f"rate limit exceeded for endpoint '{endpoint.name}'",
+                            headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
+                        )
+                tool_request, uploads = await parse_request(request, endpoint)
+                with _tracer.start_as_current_span("cli.execute") as cli_span:
+                    # Executable only — never the full argv, which can
+                    # carry request-supplied values.
+                    cli_span.set_attribute("cli.executable", endpoint.command.executable)
+                    response = execute_endpoint(
+                        endpoint, tool_request, uploads, download_templates,
+                    )
+                    cli_span.set_attribute("cli.exit_code", response.exit_code)
+                duration_seconds = response.duration_ms / 1000.0
+                if not has_template:
+                    # Classic shape: FastAPI serializes the
+                    # ToolResponse via the registered response_model.
+                    return response
+                # Templated shape: render against the run context and
+                # ship the result with the configured Content-Type.
+                # A path miss is a 500 with both the template error
+                # AND the raw envelope, so operators can see what
+                # the CLI actually returned alongside the mismatch.
+                context = _build_template_context(
+                    endpoint, tool_request, response,
                 )
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "message": "response template rendering failed",
-                        "error": str(exc),
-                        "envelope": response.model_dump(),
-                    },
-                ) from exc
-            return JSONResponse(
-                content=body,
-                media_type=endpoint.output.template_content_type,
-            )
-        except HTTPException as exc:
-            status_code = exc.status_code
-            raise
-        except Exception:
-            # Any unhandled error surfaces as a 500 to the client;
-            # record it as such before re-raising.
-            status_code = 500
-            raise
-        finally:
-            metrics.dec_inflight(endpoint.name)
-            metrics.inc_request(endpoint.name, status_code)
-            if duration_seconds is not None:
-                metrics.observe_duration(endpoint.name, duration_seconds)
+                try:
+                    body = render_template(endpoint.output.template, context)
+                except TemplateRenderError as exc:
+                    logger.error(
+                        "Response template rendering failed",
+                        extra={
+                            "endpoint": endpoint.name,
+                            "error": str(exc),
+                            "status_code": 500,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail={
+                            "message": "response template rendering failed",
+                            "error": str(exc),
+                            "envelope": response.model_dump(),
+                        },
+                    ) from exc
+                return JSONResponse(
+                    content=body,
+                    media_type=endpoint.output.template_content_type,
+                )
+            except HTTPException as exc:
+                status_code = exc.status_code
+                raise
+            except Exception:
+                # Any unhandled error surfaces as a 500 to the client;
+                # record it as such before re-raising.
+                status_code = 500
+                raise
+            finally:
+                span.set_attribute("http.response.status_code", status_code)
+                metrics.dec_inflight(endpoint.name)
+                metrics.inc_request(endpoint.name, status_code)
+                if duration_seconds is not None:
+                    metrics.observe_duration(endpoint.name, duration_seconds)
 
     # Endpoints with a template have a free-form response
     # shape, so the ToolResponse response_model would either
@@ -262,7 +279,7 @@ def register_endpoint(
     )
 
 
-ENGINE_VERSION = "1.5.0"
+ENGINE_VERSION = "1.6.0"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the
@@ -368,6 +385,8 @@ def build_application() -> FastAPI:
             "service": config.api.title,
         },
     )
+    if configure_tracing(config.api.title):
+        logger.info("OpenTelemetry tracing enabled", extra={"status_code": 200})
     logger.info(
         "Loaded configuration",
         extra={"status_code": 200, "config_summary": summarize_config(config)},
