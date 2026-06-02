@@ -16,13 +16,14 @@ traversal into the upload dir.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 import secrets
 import shlex
-import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,18 @@ from .models import ToolRequest, ToolResponse
 from .parser import OutputParseError, parse_output
 
 logger = logging.getLogger("cli_api.executor")
+
+
+@dataclass
+class _CompletedRun:
+    """The bits of a finished subprocess the rest of execute_endpoint
+    needs. Built from the async process after decoding its captured
+    output, so the success path below stays identical to the old
+    subprocess.run shape (.returncode / .stdout / .stderr)."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 # Names rendered from a YAML ``name_template`` must match this
@@ -316,7 +329,7 @@ def build_command(
     return [endpoint.command.executable, *rendered_args]
 
 
-def execute_endpoint(
+async def execute_endpoint(
     endpoint: EndpointConfig,
     request: ToolRequest,
     uploads: dict[str, UploadFile] | None = None,
@@ -372,65 +385,81 @@ def execute_endpoint(
         raise
 
     started = time.perf_counter()
+    # asyncio subprocesses are bytes-only; encode stdin going in and
+    # decode stdout/stderr coming out (errors='replace' so a tool
+    # emitting stray non-UTF-8 bytes doesn't 500 the whole request).
+    stdin_bytes = request.stdin.encode("utf-8") if request.stdin is not None else None
 
     try:
-        completed = subprocess.run(
-            command,
-            input=request.stdin,
-            text=True,
-            capture_output=True,
-            cwd=endpoint.command.cwd,
-            env={**os.environ, **endpoint.command.env},
-            timeout=endpoint.command.timeout_seconds,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
-        logger.exception(
-            "CLI executable not found",
-            extra={
-                "endpoint": endpoint.name,
-                "command": shlex.join(command),
-                "request_overrides": request.overrides,
-                "status_code": 500,
-            },
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"CLI executable not found: {endpoint.command.executable}",
-        ) from exc
-    except OSError as exc:
-        _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
-        logger.exception(
-            "CLI executable could not be launched",
-            extra={
-                "endpoint": endpoint.name,
-                "command": shlex.join(command),
-                "request_overrides": request.overrides,
-                "status_code": 500,
-            },
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"CLI executable could not be launched: {exc}",
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
-        logger.exception(
-            "CLI command timed out",
-            extra={
-                "endpoint": endpoint.name,
-                "command": shlex.join(command),
-                "request_overrides": request.overrides,
-                "duration_ms": duration_ms,
-                "status_code": 504,
-            },
-        )
-        raise HTTPException(
-            status_code=504,
-            detail=f"CLI command timed out after {endpoint.command.timeout_seconds}s",
-        ) from exc
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=endpoint.command.cwd,
+                env={**os.environ, **endpoint.command.env},
+            )
+        except FileNotFoundError as exc:
+            _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
+            logger.exception(
+                "CLI executable not found",
+                extra={
+                    "endpoint": endpoint.name,
+                    "command": shlex.join(command),
+                    "request_overrides": request.overrides,
+                    "status_code": 500,
+                },
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"CLI executable not found: {endpoint.command.executable}",
+            ) from exc
+        except OSError as exc:
+            _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
+            logger.exception(
+                "CLI executable could not be launched",
+                extra={
+                    "endpoint": endpoint.name,
+                    "command": shlex.join(command),
+                    "request_overrides": request.overrides,
+                    "status_code": 500,
+                },
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"CLI executable could not be launched: {exc}",
+            ) from exc
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(input=stdin_bytes),
+                timeout=endpoint.command.timeout_seconds,
+            )
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            # Kill the still-running child and reap it so the timeout
+            # doesn't leak a process, then surface 504.
+            proc.kill()
+            try:
+                await proc.wait()
+            except ProcessLookupError:
+                pass
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            _cleanup_files({key: value["path"] for key, value in output_file_results.items()})
+            logger.exception(
+                "CLI command timed out",
+                extra={
+                    "endpoint": endpoint.name,
+                    "command": shlex.join(command),
+                    "request_overrides": request.overrides,
+                    "duration_ms": duration_ms,
+                    "status_code": 504,
+                },
+            )
+            raise HTTPException(
+                status_code=504,
+                detail=f"CLI command timed out after {endpoint.command.timeout_seconds}s",
+            ) from exc
     finally:
         for upload in uploads.values():
             upload.file.close()
@@ -438,6 +467,12 @@ def execute_endpoint(
             Path(path).unlink(missing_ok=True)
 
     duration_ms = int((time.perf_counter() - started) * 1000)
+
+    completed = _CompletedRun(
+        returncode=proc.returncode if proc.returncode is not None else -1,
+        stdout=stdout_bytes.decode("utf-8", errors="replace"),
+        stderr=stderr_bytes.decode("utf-8", errors="replace"),
+    )
 
     if completed.returncode != 0:
         _cleanup_files({key: value["path"] for key, value in output_file_results.items()})

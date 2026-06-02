@@ -5,6 +5,32 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [2.0.0rc1] - 2026-06-01
+
+Release candidate for 2.0 — the async executor. Tagged as an RC to
+bake before GA (streaming I/O lands in 2.0.0).
+
+### Changed (BREAKING)
+- **Async subprocess executor.** `execute_endpoint` is now a
+  coroutine and runs the wrapped CLI via
+  `asyncio.create_subprocess_exec` + `asyncio.wait_for` instead of
+  the blocking `subprocess.run`. Concurrent long-running
+  conversions (LibreOffice, pandoc, audfprint) no longer pin a
+  worker / block the event loop — a slow request on one endpoint
+  doesn't stall every other in-flight request. The route handler
+  now `await`s it.
+- Semantics preserved exactly: missing executable → 500, non-zero
+  exit → 502 (structured `{exit_code, stderr}`), timeout → 504 (the
+  child is killed and reaped), parse failure → 502. stdout/stderr
+  are decoded UTF-8 with `errors="replace"` so a tool emitting
+  stray bytes can't 500 the request.
+
+### Why the major bump
+- `execute_endpoint` went from a sync function to a coroutine —
+  breaking for anything importing/calling it directly. The HTTP
+  contract is unchanged; no YAML/config changes. `ENGINE_VERSION`
+  `1.7.0 -> 2.0.0rc1`.
+
 ## [1.7.0] - 2026-06-01
 
 ### Added
@@ -502,7 +528,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v2.0.0rc1...HEAD
+[2.0.0rc1]: https://github.com/cobdfamily/url2code/compare/v1.7.0...v2.0.0rc1
 [1.7.0]: https://github.com/cobdfamily/url2code/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/cobdfamily/url2code/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/cobdfamily/url2code/compare/v1.4.0...v1.5.0

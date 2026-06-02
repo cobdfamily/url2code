@@ -10,7 +10,7 @@ from url2code.executor import (
 from url2code.main import build_output_download_path
 from url2code.models import ToolRequest
 from fastapi import HTTPException
-import subprocess
+import asyncio
 import pytest
 
 
@@ -210,7 +210,7 @@ def test_random_filename_token_is_64_hex_chars() -> None:
     assert all(character in "0123456789abcdef" for character in token)
 
 
-def test_execute_endpoint_returns_download_url(monkeypatch, tmp_path) -> None:
+async def test_execute_endpoint_returns_download_url(monkeypatch, tmp_path) -> None:
     endpoint = EndpointConfig.model_validate(
         {
             "name": "file-out",
@@ -230,12 +230,9 @@ def test_execute_endpoint_returns_download_url(monkeypatch, tmp_path) -> None:
         }
     )
 
-    def fake_run(*args, **kwargs):
-        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="ok", stderr="")
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"ok"))
 
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
-
-    response = execute_endpoint(
+    response = await execute_endpoint(
         endpoint,
         ToolRequest(),
         download_path_templates={"output_file": build_output_download_path("/tools/run", "output_file")},
@@ -506,6 +503,48 @@ def test_build_command_rejects_unknown_override():
 # ---------------------------------------------------------------------------
 
 
+class _FakeProc:
+    """Stand-in for an asyncio subprocess. `hang=True` makes
+    communicate() sleep so a wait_for(timeout=0) trips the timeout
+    path; otherwise communicate() returns the canned (stdout, stderr)
+    bytes and `returncode` is reported as-is."""
+
+    def __init__(self, returncode=0, stdout=b"", stderr=b"", hang=False):
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+        self._hang = hang
+
+    async def communicate(self, input=None):
+        if self._hang:
+            await asyncio.sleep(30)  # cancelled by wait_for(timeout=0)
+        return self._stdout, self._stderr
+
+    def kill(self):
+        pass
+
+    async def wait(self):
+        return self.returncode
+
+
+def _patch_exec(monkeypatch, *, proc=None, exc=None, captured=None):
+    """Replace asyncio.create_subprocess_exec (as the executor sees
+    it) with a fake that either raises `exc` or returns `proc`,
+    optionally recording the argv it was invoked with into
+    `captured["argv"]`."""
+
+    async def _create(*argv, **kwargs):
+        if captured is not None:
+            captured["argv"] = list(argv)
+        if exc is not None:
+            raise exc
+        return proc
+
+    monkeypatch.setattr(
+        "url2code.executor.asyncio.create_subprocess_exec", _create,
+    )
+
+
 def _executable_endpoint(tmp_path) -> EndpointConfig:
     return EndpointConfig.model_validate(
         {
@@ -522,76 +561,65 @@ def _executable_endpoint(tmp_path) -> EndpointConfig:
     )
 
 
-def test_execute_endpoint_handles_file_not_found(monkeypatch, tmp_path):
-    """``FileNotFoundError`` from subprocess.run -> 500 with a
+async def test_execute_endpoint_handles_file_not_found(monkeypatch, tmp_path):
+    """``FileNotFoundError`` from the spawn -> 500 with a
     descriptive message naming the executable."""
     ep = _executable_endpoint(tmp_path)
-
-    def fake_run(*a, **kw):
-        raise FileNotFoundError("no such file")
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+    _patch_exec(monkeypatch, exc=FileNotFoundError("no such file"))
 
     with pytest.raises(HTTPException) as exc:
-        execute_endpoint(ep, ToolRequest())
+        await execute_endpoint(ep, ToolRequest())
     assert exc.value.status_code == 500
     assert "executable not found" in str(exc.value.detail)
 
 
-def test_execute_endpoint_handles_oserror(monkeypatch, tmp_path):
+async def test_execute_endpoint_handles_oserror(monkeypatch, tmp_path):
     """Any non-FileNotFound OSError (eg. permission denied) is a
     500 too, but with the underlying error attached for ops."""
     ep = _executable_endpoint(tmp_path)
-
-    def fake_run(*a, **kw):
-        raise PermissionError("denied")
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+    _patch_exec(monkeypatch, exc=PermissionError("denied"))
 
     with pytest.raises(HTTPException) as exc:
-        execute_endpoint(ep, ToolRequest())
+        await execute_endpoint(ep, ToolRequest())
     assert exc.value.status_code == 500
     assert "could not be launched" in str(exc.value.detail)
 
 
-def test_execute_endpoint_handles_timeout(monkeypatch, tmp_path):
-    """``subprocess.TimeoutExpired`` -> 504, not 500. Tools that
-    hang are a different operational class than tools that crash
-    or are missing."""
-    ep = _executable_endpoint(tmp_path)
-
-    def fake_run(*a, **kw):
-        raise subprocess.TimeoutExpired(cmd="tool", timeout=5)
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+async def test_execute_endpoint_handles_timeout(monkeypatch, tmp_path):
+    """A child that outruns its timeout -> 504, not 500. Tools that
+    hang are a different operational class than tools that crash or
+    are missing. timeout_seconds=0 + a sleeping fake trips wait_for
+    immediately."""
+    ep = EndpointConfig.model_validate(
+        {
+            "name": "slow",
+            "route": "/run",
+            "command": {"executable": "tool", "args": [], "timeout_seconds": 0},
+        }
+    )
+    _patch_exec(monkeypatch, proc=_FakeProc(hang=True))
 
     with pytest.raises(HTTPException) as exc:
-        execute_endpoint(ep, ToolRequest())
+        await execute_endpoint(ep, ToolRequest())
     assert exc.value.status_code == 504
     assert "timed out" in str(exc.value.detail)
 
 
-def test_execute_endpoint_handles_nonzero_returncode(monkeypatch, tmp_path):
+async def test_execute_endpoint_handles_nonzero_returncode(monkeypatch, tmp_path):
     """Non-zero exit -> 502 with a structured detail dict
     containing exit_code and stderr so the caller can render
     error UI without parsing the message string."""
     ep = _executable_endpoint(tmp_path)
-
-    def fake_run(*a, **kw):
-        return subprocess.CompletedProcess(
-            args=a[0], returncode=2, stdout="", stderr="bad input",
-        )
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=2, stderr=b"bad input"))
 
     with pytest.raises(HTTPException) as exc:
-        execute_endpoint(ep, ToolRequest())
+        await execute_endpoint(ep, ToolRequest())
     assert exc.value.status_code == 502
     assert exc.value.detail["exit_code"] == 2
     assert exc.value.detail["stderr"] == "bad input"
 
 
-def test_execute_endpoint_handles_output_parse_error(monkeypatch, tmp_path):
+async def test_execute_endpoint_handles_output_parse_error(monkeypatch, tmp_path):
     """The CLI succeeded but its stdout doesn't match the
     configured output schema -> 502 (the CLI gave us garbage,
     not the caller). Output files still get cleaned up."""
@@ -603,21 +631,15 @@ def test_execute_endpoint_handles_output_parse_error(monkeypatch, tmp_path):
             "output": {"mode": "native_json"},
         }
     )
-
-    def fake_run(*a, **kw):
-        return subprocess.CompletedProcess(
-            args=a[0], returncode=0, stdout="not json", stderr="",
-        )
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"not json"))
 
     with pytest.raises(HTTPException) as exc:
-        execute_endpoint(ep, ToolRequest())
+        await execute_endpoint(ep, ToolRequest())
     assert exc.value.status_code == 502
     assert "valid JSON" in str(exc.value.detail)
 
 
-def test_execute_endpoint_text_mode_returns_raw_stdout(monkeypatch, tmp_path):
+async def test_execute_endpoint_text_mode_returns_raw_stdout(monkeypatch, tmp_path):
     """``mode: text`` returns parsed_output=None and lets the
     caller use stdout directly."""
     ep = EndpointConfig.model_validate(
@@ -628,15 +650,9 @@ def test_execute_endpoint_text_mode_returns_raw_stdout(monkeypatch, tmp_path):
             "output": {"mode": "text"},
         }
     )
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"raw text\n"))
 
-    def fake_run(*a, **kw):
-        return subprocess.CompletedProcess(
-            args=a[0], returncode=0, stdout="raw text\n", stderr="",
-        )
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
-
-    response = execute_endpoint(ep, ToolRequest())
+    response = await execute_endpoint(ep, ToolRequest())
     assert response.parsed_output is None
     assert response.stdout == "raw text\n"
     assert response.exit_code == 0
@@ -722,7 +738,7 @@ def test_render_upload_name_accepts_typical_canonical_ids():
         assert out == f"{ok}.m4a"
 
 
-def test_execute_endpoint_writes_upload_with_templated_name(
+async def test_execute_endpoint_writes_upload_with_templated_name(
     monkeypatch, tmp_path,
 ):
     """End-to-end: an endpoint that templates the upload name
@@ -753,14 +769,7 @@ def test_execute_endpoint_writes_upload_with_templated_name(
     })
 
     captured: dict = {}
-
-    def fake_run(*args, **kwargs):
-        captured["argv"] = args[0]
-        return subprocess.CompletedProcess(
-            args=args[0], returncode=0, stdout="ok", stderr="",
-        )
-
-    monkeypatch.setattr("url2code.executor.subprocess.run", fake_run)
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"ok"), captured=captured)
 
     upload = UploadFile(
         filename="raw-input.m4a",
@@ -768,7 +777,7 @@ def test_execute_endpoint_writes_upload_with_templated_name(
     )
     request = ToolRequest(flag_values={"id": "tt0133093"})
 
-    execute_endpoint(endpoint, request, uploads={"audio": upload})
+    await execute_endpoint(endpoint, request, uploads={"audio": upload})
 
     # The argv should reference the templated path, not a
     # random-hex name.

@@ -204,7 +204,7 @@ def register_endpoint(
                     # Executable only — never the full argv, which can
                     # carry request-supplied values.
                     cli_span.set_attribute("cli.executable", endpoint.command.executable)
-                    response = execute_endpoint(
+                    response = await execute_endpoint(
                         endpoint, tool_request, uploads, download_templates,
                     )
                     cli_span.set_attribute("cli.exit_code", response.exit_code)
@@ -287,7 +287,7 @@ def register_endpoint(
     )
 
 
-ENGINE_VERSION = "1.7.0"
+ENGINE_VERSION = "2.0.0rc1"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the
