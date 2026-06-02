@@ -25,6 +25,7 @@ YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, ca
 - Structured JSON logs for success, failures, parsing errors, and timeouts
 - Optional per-endpoint rate limiting and request-size caps (`429` / `413`)
 - Split liveness (`/`) and readiness (`/readyz`) probes; graceful shutdown drain
+- Prometheus `/metrics` (requests, in-flight, CLI-duration histogram) — no extra deps
 - Lightweight container via `python:3.12-slim`
 - `uv` included in the container for installing Python-distributed CLI tools
 
@@ -469,6 +470,26 @@ On shutdown (SIGTERM) the server stops accepting new requests and
 drains in-flight CLI runs for up to `URL2CODE_DRAIN_SECONDS`
 (default 30) before exiting, so rolling deploys don't kill a
 mid-conversion request.
+
+## Metrics
+
+`GET /metrics` serves Prometheus text exposition (format 0.0.4) —
+no extra dependency, and no dashboard required (it's plain text
+you can scrape or read directly, which keeps it accessible).
+Series:
+
+- `url2code_requests_total{endpoint,status}` — request counter by
+  endpoint and final HTTP status.
+- `url2code_in_flight_requests{endpoint}` — concurrent in-flight
+  gauge.
+- `url2code_request_duration_seconds{endpoint}` — CLI wall-time
+  histogram (buckets 0.05s–30s, plus `_sum` / `_count`).
+
+The infra routes (`/`, `/readyz`, `/metrics`) aren't counted.
+
+> Counters are per process. With multiple uvicorn workers each
+> worker exposes its own series — scrape each, or aggregate at
+> the collector. Same multi-worker caveat as the rate limiter.
 
 ## Container
 

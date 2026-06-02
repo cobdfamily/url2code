@@ -5,6 +5,36 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-01
+
+### Added
+- **Prometheus metrics at `GET /metrics`** — hand-rolled text
+  exposition (format 0.0.4), no new runtime dependency. Series:
+    * `url2code_requests_total{endpoint,status}` — counter of
+      every endpoint request by final HTTP status (200, 413,
+      429, 502, 504, 500, ...).
+    * `url2code_in_flight_requests{endpoint}` — gauge of
+      concurrent in-flight requests.
+    * `url2code_request_duration_seconds{endpoint}` — histogram
+      of CLI wall time (observed only when the command ran),
+      buckets 0.05s–30s plus `_sum` / `_count`.
+  Plain text, so it's screen-reader / CLI friendly with no
+  dashboard required. The infra routes (`/`, `/readyz`,
+  `/metrics`) are not themselves counted.
+
+### Changed
+- `ENGINE_VERSION` `1.4.0 -> 1.5.0`.
+- The route handler now records every request — success or raised
+  `HTTPException` — by final status, tracks in-flight in a
+  `finally`, and observes CLI duration when the command ran.
+- New `url2code.metrics` module (thread-safe, dependency-free
+  registry + exposition renderer).
+
+### Compatibility
+- Additive: `/metrics` is a new route; nothing else changes.
+  Counters are per process — with multiple workers each exposes
+  its own series (same multi-worker caveat as the rate limiter).
+
 ## [1.4.0] - 2026-06-01
 
 ### Added
@@ -418,7 +448,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/cobdfamily/url2code/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/cobdfamily/url2code/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/cobdfamily/url2code/compare/v1.1.1...v1.3.0
 [1.1.1]: https://github.com/cobdfamily/url2code/compare/v1.0.8...v1.1.1

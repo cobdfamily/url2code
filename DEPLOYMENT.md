@@ -104,6 +104,11 @@ curl -fsS https://tools.cobd.ca/
 # check here; keep liveness on `/`.
 curl -fsS https://tools.cobd.ca/readyz
 
+# Prometheus metrics (plain-text exposition; point your scraper
+# here). Per-process counters — scrape each worker if you run
+# more than one.
+curl -fsS https://tools.cobd.ca/metrics
+
 # Generated OpenAPI docs:
 #   https://tools.cobd.ca/docs    (Swagger UI)
 #   https://tools.cobd.ca/redocs  (ReDoc, trailing s)
