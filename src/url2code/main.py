@@ -17,6 +17,7 @@ tool surface.
 
 from __future__ import annotations
 
+import math
 import os
 import logging
 from pathlib import Path
@@ -24,10 +25,19 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from .config import AppConfig, EndpointConfig, build_full_path, load_config, summarize_config
+from .config import (
+    AppConfig,
+    EndpointConfig,
+    LimitsConfig,
+    build_full_path,
+    effective_limits,
+    load_config,
+    summarize_config,
+)
 from .executor import execute_endpoint, request_template_values
 from .logging_config import configure_logging
 from .models import ToolResponse
+from .ratelimit import RateLimiter, client_ip
 from .request_parser import parse_request
 from .templating import TemplateRenderError, render_template
 
@@ -108,12 +118,57 @@ def _build_template_context(
     }
 
 
-def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str) -> None:
+def register_endpoint(
+    app: FastAPI,
+    endpoint: EndpointConfig,
+    default_root: str,
+    app_limits: LimitsConfig | None = None,
+    limiter: RateLimiter | None = None,
+) -> None:
     path = build_full_path(default_root, endpoint)
     download_templates = register_download_routes(app, endpoint, path)
     has_template = endpoint.output.template is not None
+    # Resolve the effective limits once at registration — config
+    # is static, so there's no need to recompute per request.
+    endpoint_limits = (
+        effective_limits(app_limits, endpoint) if app_limits is not None else LimitsConfig()
+    )
+    rate_limit = endpoint_limits.rate_limit
 
     async def handler(request: Request):
+        # Abuse-resistance gates (1.3.0). Evaluated before the
+        # request body is read, so an oversize upload is rejected
+        # with 413 before it ever touches disk.
+        if endpoint_limits.max_request_bytes is not None:
+            content_length = request.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    declared = int(content_length)
+                except ValueError:
+                    declared = None
+                if declared is not None and declared > endpoint_limits.max_request_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"request body {declared} bytes exceeds the "
+                            f"{endpoint_limits.max_request_bytes}-byte limit "
+                            f"for endpoint '{endpoint.name}'"
+                        ),
+                    )
+        if rate_limit is not None and limiter is not None:
+            allowed, retry_after = limiter.check(
+                f"{endpoint.name}:{client_ip(request)}",
+                rate_limit.requests,
+                rate_limit.window_seconds,
+            )
+            if not allowed:
+                # Retry-After is whole seconds, min 1 — a 0 would
+                # invite an immediate retry that just bounces again.
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"rate limit exceeded for endpoint '{endpoint.name}'",
+                    headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
+                )
         tool_request, uploads = await parse_request(request, endpoint)
         response = execute_endpoint(
             endpoint, tool_request, uploads, download_templates,
@@ -182,7 +237,7 @@ def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str)
     )
 
 
-ENGINE_VERSION = "1.1.1"
+ENGINE_VERSION = "1.3.0"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the
@@ -203,6 +258,11 @@ def create_app(config: AppConfig) -> FastAPI:
         redoc_url="/redocs",
     )
 
+    # One token-bucket limiter shared across the app's endpoints;
+    # buckets are keyed per (endpoint, client IP) inside it.
+    limiter = RateLimiter()
+    app.state.rate_limiter = limiter
+
     @app.get("/", tags=["Health"])
     async def root() -> dict[str, str]:
         # ``service`` echoes the YAML's api.title so a downstream
@@ -217,7 +277,7 @@ def create_app(config: AppConfig) -> FastAPI:
         }
 
     for endpoint in config.endpoints:
-        register_endpoint(app, endpoint, config.api.default_root)
+        register_endpoint(app, endpoint, config.api.default_root, config.limits, limiter)
 
     return app
 

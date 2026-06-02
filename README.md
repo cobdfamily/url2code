@@ -23,6 +23,7 @@ YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, ca
 - Native JSON parsing or regex-to-JSON parsing for text output
 - **Optional response-shape templating** (see below) -- reshape the response body to whatever JSON your consumer needs (Redfish, HAL, custom schema). Endpoints without a template keep the classic envelope.
 - Structured JSON logs for success, failures, parsing errors, and timeouts
+- Optional per-endpoint rate limiting and request-size caps (`429` / `413`)
 - Lightweight container via `python:3.12-slim`
 - `uv` included in the container for installing Python-distributed CLI tools
 
@@ -241,6 +242,48 @@ see what the CLI actually returned alongside the
 template mismatch. Loud failures beat silent half-
 correct output.
 
+## Rate limiting and size caps
+
+Optional, opt-in abuse resistance. Add a `limits:` block at the
+top level (a fleet-wide default) and/or per endpoint (overrides
+the default field-by-field). Omit it entirely and behavior is
+unchanged from earlier versions.
+
+```yaml
+limits:                        # top-level: default for every endpoint
+  max_request_bytes: 26214400  # 25 MiB; 413 if Content-Length exceeds it
+  rate_limit:
+    requests: 60               # token-bucket capacity
+    window_seconds: 60         # refilled over this window (~1 req/s sustained)
+
+endpoints:
+  - name: convert
+    route: /convert
+    command:
+      executable: /app/bin/convert
+    limits:                    # per-endpoint override (optional)
+      rate_limit:
+        requests: 5
+        window_seconds: 60     # tighter cap on an expensive endpoint;
+                               # max_request_bytes inherited from the top level
+```
+
+- **`max_request_bytes`** — a request whose `Content-Length`
+  exceeds this is rejected with `413` before the body is read
+  to disk. Uploads dominate body size, so this caps them too.
+  A client that omits `Content-Length` skips the check (gate
+  that at your reverse proxy).
+- **`rate_limit`** — an in-process token bucket keyed per
+  (endpoint, client IP). Over-limit requests get `429` with a
+  `Retry-After` header. The client IP is the left-most
+  `X-Forwarded-For` hop, else the socket peer.
+
+> The limiter is per process. With multiple uvicorn workers
+> each keeps its own buckets, so the effective ceiling is
+> roughly *workers × requests*. For a hard, coordinated global
+> limit, rate-limit at the reverse proxy; this is a cheap
+> in-app backstop against a single hot client.
+
 ## Request Format
 
 For JSON-only endpoints:
@@ -375,6 +418,8 @@ Set `multiple: true` to collect all matches into a JSON array.
 ## Error Handling
 
 - `400` for invalid request fields, invalid flag values, or missing placeholder values
+- `413` when `limits.max_request_bytes` is set and the request's `Content-Length` exceeds it
+- `429` (with `Retry-After`) when `limits.rate_limit` is set and the per-(endpoint, client-IP) bucket is exhausted
 - `500` when the executable is missing
 - `502` when the command exits non-zero or output parsing fails
 - `504` when the command times out

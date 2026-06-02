@@ -41,6 +41,30 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class RateLimitConfig(BaseModel):
+    # Token bucket: `requests` tokens, refilled over
+    # `window_seconds`. e.g. requests=60, window_seconds=60
+    # -> ~1 req/s sustained with a burst of 60.
+    requests: int = Field(gt=0)
+    window_seconds: float = Field(default=60.0, gt=0)
+
+
+class LimitsConfig(BaseModel):
+    """Optional abuse-resistance limits. All fields default to
+    None/unset, so a config without a `limits:` block (or an
+    endpoint without one) behaves exactly as pre-1.3 url2code."""
+
+    # Reject a request whose Content-Length exceeds this many
+    # bytes with 413, before the body is read to disk. Uploads
+    # dominate body size, so this caps them too. A client that
+    # omits Content-Length bypasses the check (the reverse
+    # proxy is the backstop there).
+    max_request_bytes: int | None = Field(default=None, gt=0)
+    # Per-(endpoint, client-IP) token-bucket rate limit. None
+    # means unlimited.
+    rate_limit: RateLimitConfig | None = None
+
+
 class RegexOutputConfig(BaseModel):
     pattern: str
     flags: list[str] = Field(default_factory=list)
@@ -165,6 +189,11 @@ class EndpointConfig(BaseModel):
     uploads: list[UploadConfig] = Field(default_factory=list)
     output_files: list[OutputFileConfig] = Field(default_factory=list)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    # Per-endpoint limits override. When set, each field falls
+    # back to the app-level `limits` default if left None (see
+    # effective_limits). When None, the app-level default applies
+    # wholesale.
+    limits: LimitsConfig | None = None
 
     @model_validator(mode="after")
     def validate_unique_endpoint_fields(self) -> "EndpointConfig":
@@ -193,6 +222,9 @@ class EndpointConfig(BaseModel):
 class AppConfig(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    # Fleet-wide default limits; per-endpoint `limits` override
+    # individual fields. Empty default = no limits anywhere.
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
     endpoints: list[EndpointConfig]
 
     @model_validator(mode="after")
@@ -232,6 +264,30 @@ def build_full_path(default_root: str, endpoint: EndpointConfig) -> str:
     normalized_root = normalize_root(root)
     normalized_route = normalize_route(endpoint.route)
     return normalized_route if not normalized_root else f"{normalized_root}{normalized_route}"
+
+
+def effective_limits(app_limits: LimitsConfig, endpoint: EndpointConfig) -> LimitsConfig:
+    """Resolve the limits that apply to one endpoint.
+
+    An endpoint with no `limits` block inherits the app-level
+    default wholesale. An endpoint that sets `limits` overrides
+    field-by-field: any field it leaves None falls back to the
+    app default, so a service can override just the rate limit
+    while keeping the global size cap.
+    """
+    override = endpoint.limits
+    if override is None:
+        return app_limits
+    return LimitsConfig(
+        max_request_bytes=(
+            override.max_request_bytes
+            if override.max_request_bytes is not None
+            else app_limits.max_request_bytes
+        ),
+        rate_limit=(
+            override.rate_limit if override.rate_limit is not None else app_limits.rate_limit
+        ),
+    )
 
 
 def summarize_config(config: AppConfig) -> list[dict[str, str | int]]:

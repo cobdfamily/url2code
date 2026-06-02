@@ -5,6 +5,46 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-01
+
+### Added
+- **Optional rate limiting + request-size caps.** New
+  `limits:` block, settable fleet-wide at the top level and
+  overridable per endpoint (field-by-field):
+    * `limits.max_request_bytes` — reject a request whose
+      `Content-Length` exceeds the cap with `413`, before the
+      body is read to disk. Uploads dominate body size, so
+      this bounds them too. A client that omits `Content-
+      Length` bypasses the check (the reverse proxy is the
+      backstop there).
+    * `limits.rate_limit: {requests, window_seconds}` — an
+      in-process token bucket keyed per (endpoint, client IP).
+      Over-limit requests get `429` with a `Retry-After`
+      header. With multiple uvicorn workers each worker holds
+      its own buckets, so the effective ceiling is ~N x the
+      configured rate; use the reverse proxy for a hard,
+      coordinated global limit.
+  Client IP comes from the left-most `X-Forwarded-For` hop
+  (url2code runs behind a TLS proxy), falling back to the
+  socket peer.
+- New `url2code.ratelimit` module (token bucket + client-IP
+  helper), plus `config.effective_limits` to resolve the
+  app-default / per-endpoint merge.
+
+### Changed
+- `ENGINE_VERSION` `1.1.1 -> 1.3.0`.
+
+### Compatibility
+- Fully backwards compatible: a config without a `limits:`
+  block (and an endpoint without one) behaves exactly as
+  1.1.x — every existing consumer keeps working unchanged.
+
+### Note
+- **1.2.0 is intentionally skipped.** It was reserved for
+  optional API-key auth, which the fleet cancelled (auth is
+  gated at the reverse proxy by design). The next engine minor
+  after 1.1.x is therefore 1.3.0.
+
 ## [1.1.1] - 2026-06-01
 
 ### Added
@@ -347,7 +387,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/cobdfamily/url2code/compare/v1.1.1...v1.3.0
 [1.1.1]: https://github.com/cobdfamily/url2code/compare/v1.0.8...v1.1.1
 [1.0.7]: https://github.com/cobdfamily/url2code/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/cobdfamily/url2code/compare/v1.0.5...v1.0.6
