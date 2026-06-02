@@ -127,7 +127,10 @@ def _build_output_path(output_dir: str, prefix: str | None, suffix: str | None) 
 
 def _cleanup_files(paths: dict[str, str]) -> None:
     for path in paths.values():
-        Path(path).unlink(missing_ok=True)
+        # Skip empty entries — an omitted optional upload binds its
+        # placeholder to "" (which Path() would treat as ".").
+        if path:
+            Path(path).unlink(missing_ok=True)
 
 
 def _coerce_override_value(endpoint: EndpointConfig, key: str, value: Any) -> Any:
@@ -377,6 +380,13 @@ async def execute_endpoint(
         for upload_config in endpoint.uploads:
             upload = uploads.get(upload_config.placeholder)
             if upload is None:
+                if not upload_config.required:
+                    # Optional upload omitted: bind its placeholder to
+                    # an empty string so command args referencing it
+                    # render empty (the shim decides what to do with
+                    # that), rather than 400 or KeyError.
+                    upload_paths[upload_config.placeholder] = ""
+                    continue
                 raise HTTPException(
                     status_code=400,
                     detail=f"missing upload content for placeholder '{upload_config.placeholder}'",
@@ -473,7 +483,9 @@ async def execute_endpoint(
         for upload in uploads.values():
             upload.file.close()
         for path in upload_paths.values():
-            Path(path).unlink(missing_ok=True)
+            # "" is an omitted optional upload (Path("") == ".").
+            if path:
+                Path(path).unlink(missing_ok=True)
 
     duration_ms = int((time.perf_counter() - started) * 1000)
 

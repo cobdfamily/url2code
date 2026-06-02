@@ -64,6 +64,10 @@ async def parse_request(request: Request, endpoint: EndpointConfig) -> tuple[Too
         for upload_config in endpoint.uploads:
             value = form.get(upload_config.field_name)
             if value is None:
+                if not upload_config.required:
+                    # Optional upload omitted: skip it. The executor
+                    # renders its placeholder as an empty string.
+                    continue
                 raise HTTPException(
                     status_code=400,
                     detail=f"missing upload field '{upload_config.field_name}' for endpoint '{endpoint.name}'",

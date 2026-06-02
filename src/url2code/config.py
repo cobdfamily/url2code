@@ -153,6 +153,13 @@ class UploadConfig(BaseModel):
     field_name: str
     placeholder: str
     temp_dir: str = "/tmp/url2code/uploads"
+    # When False, the multipart field may be omitted: a missing
+    # upload is not a 400, and the placeholder renders as an empty
+    # string in command args (so the wrapped CLI / shim can decide
+    # whether to add the corresponding flag). Defaults to True —
+    # every pre-2.1 upload stays mandatory. Enables optional inputs
+    # like pandoc's --bibliography / --csl.
+    required: bool = True
     # When set, the saved upload uses this template (rendered with
     # the same value bag command args see — defaults + validated
     # overrides) instead of a random hex token. The original

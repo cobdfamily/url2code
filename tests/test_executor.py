@@ -786,6 +786,78 @@ async def test_execute_endpoint_writes_upload_with_templated_name(
 
 
 # ---------------------------------------------------------------------------
+# optional uploads (required: false)
+# ---------------------------------------------------------------------------
+
+
+def _doc_and_bib_endpoint(tmp_path) -> EndpointConfig:
+    """A required `document` upload + an optional `bibliography`
+    one; the argv is <exe> <doc-path> <bib-path>."""
+    return EndpointConfig.model_validate({
+        "name": "cite",
+        "route": "/x",
+        "command": {"executable": "tool", "args": ["{doc}", "{bib}"]},
+        "uploads": [
+            {"field_name": "document", "placeholder": "doc",
+             "temp_dir": str(tmp_path / "u")},
+            {"field_name": "bibliography", "placeholder": "bib",
+             "temp_dir": str(tmp_path / "u"), "required": False},
+        ],
+    })
+
+
+async def test_optional_upload_absent_renders_empty(monkeypatch, tmp_path):
+    """An upload with required=false may be omitted: no 400, and
+    its placeholder renders as an empty string in the argv."""
+    from io import BytesIO
+
+    from fastapi import UploadFile
+
+    endpoint = _doc_and_bib_endpoint(tmp_path)
+    captured: dict = {}
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"ok"), captured=captured)
+
+    doc = UploadFile(filename="d.md", file=BytesIO(b"hello"))
+    await execute_endpoint(endpoint, ToolRequest(), uploads={"doc": doc})
+
+    _exe, doc_path, bib = captured["argv"]
+    assert doc_path.endswith(".md")
+    assert bib == ""  # absent optional upload -> empty placeholder
+
+
+async def test_optional_upload_present_is_written(monkeypatch, tmp_path):
+    """When the optional upload IS supplied, its placeholder
+    resolves to the written path like any other upload."""
+    from io import BytesIO
+
+    from fastapi import UploadFile
+
+    endpoint = _doc_and_bib_endpoint(tmp_path)
+    captured: dict = {}
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"ok"), captured=captured)
+
+    doc = UploadFile(filename="d.md", file=BytesIO(b"hello"))
+    bib = UploadFile(filename="refs.bib", file=BytesIO(b"@book{x,title={Y}}"))
+    await execute_endpoint(
+        endpoint, ToolRequest(), uploads={"doc": doc, "bib": bib},
+    )
+
+    _exe, _doc_path, bib_path = captured["argv"]
+    assert bib_path.endswith(".bib") and bib_path != ""
+
+
+async def test_required_upload_absent_still_400(monkeypatch, tmp_path):
+    """Regression: an omitted REQUIRED upload is still a 400."""
+    endpoint = _doc_and_bib_endpoint(tmp_path)
+    _patch_exec(monkeypatch, proc=_FakeProc(returncode=0, stdout=b"ok"))
+
+    with pytest.raises(HTTPException) as exc:
+        await execute_endpoint(endpoint, ToolRequest(), uploads={})
+    assert exc.value.status_code == 400
+    assert "missing upload content" in str(exc.value.detail)
+
+
+# ---------------------------------------------------------------------------
 # / liveness — service field echoes the configured api.title
 # ---------------------------------------------------------------------------
 

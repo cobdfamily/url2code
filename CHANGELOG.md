@@ -5,6 +5,25 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-01
+
+### Added
+- **Optional uploads.** An `uploads[*]` entry may set
+  `required: false`. The multipart field can then be omitted: a
+  missing upload is no longer a `400`, and its placeholder renders
+  as an empty string in the command args, so the wrapped CLI/shim
+  decides whether to use it (e.g. emit a `--flag` only when the
+  file is present). Required uploads (the default) and absent
+  *required* uploads still `400`. Unblocks optional inputs like
+  pandoc's `--bibliography` / `--csl` (citeproc).
+
+### Changed
+- `ENGINE_VERSION` `2.0.0 -> 2.1.0`.
+
+### Compatibility
+- Additive: `uploads` default to `required: true`, byte-identical
+  to pre-2.1 behavior.
+
 ## [2.0.0] - 2026-06-01
 
 GA for 2.0 — the async executor (2.0.0rc1, below) plus streamed
@@ -551,7 +570,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/cobdfamily/url2code/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/cobdfamily/url2code/compare/v2.0.0rc1...v2.0.0
 [2.0.0rc1]: https://github.com/cobdfamily/url2code/compare/v1.7.0...v2.0.0rc1
 [1.7.0]: https://github.com/cobdfamily/url2code/compare/v1.6.0...v1.7.0

@@ -111,6 +111,11 @@ Notes:
 - `request.validations` defines which placeholder names callers may supply and enforces type checks.
 - `request.flags` defines approved request fields that render into CLI flags.
 - `uploads` maps multipart form file fields to command placeholders.
+- `uploads[*].required` (default `true`) — set `false` to make an
+  upload optional: the field may be omitted (no `400`) and its
+  placeholder renders as an empty string, so the wrapped tool/shim
+  can add a flag only when the file is present (e.g. pandoc's
+  `--bibliography`).
 - `uploads[*].name_template` (optional) — render the saved upload's
   filename from the same value bag command args see (defaults +
   validated overrides), instead of the default random hex token.
