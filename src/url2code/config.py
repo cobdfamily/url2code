@@ -17,6 +17,8 @@ debug summary for the boot log.
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 
@@ -288,6 +290,35 @@ def effective_limits(app_limits: LimitsConfig, endpoint: EndpointConfig) -> Limi
             override.rate_limit if override.rate_limit is not None else app_limits.rate_limit
         ),
     )
+
+
+def resolve_executable(executable: str) -> bool:
+    """True if `executable` looks runnable right now.
+
+    A path-like value (contains ``/``) must exist and carry the
+    execute bit. A bare name is looked up on ``PATH`` the same
+    way the OS would when the subprocess is spawned. This is the
+    readiness check's primitive — it catches a downstream image
+    that declared an endpoint but never installed the CLI.
+    """
+    if "/" in executable:
+        return os.path.isfile(executable) and os.access(executable, os.X_OK)
+    return shutil.which(executable) is not None
+
+
+def missing_executables(config: AppConfig) -> list[str]:
+    """Distinct command executables that aren't runnable, sorted.
+
+    An empty list means every wrapped CLI is present — i.e. the
+    service is ready to serve. Executables are de-duplicated so a
+    tool referenced by 40 endpoints is probed once.
+    """
+    checked: dict[str, bool] = {}
+    for endpoint in config.endpoints:
+        executable = endpoint.command.executable
+        if executable not in checked:
+            checked[executable] = resolve_executable(executable)
+    return sorted(name for name, ok in checked.items() if not ok)
 
 
 def summarize_config(config: AppConfig) -> list[dict[str, str | int]]:

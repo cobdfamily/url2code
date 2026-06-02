@@ -5,6 +5,37 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-01
+
+### Added
+- **Readiness probe, split from liveness.** New `GET /readyz`
+  probes every endpoint's `command.executable` (a path-like value
+  must exist and be executable; a bare name must resolve on
+  `PATH`) and returns `200 {"status":"ready","checked":N}` when
+  all are present, or `503 {"status":"not ready","missing":[...]}`
+  when any is absent. `GET /` stays liveness-only — the process
+  is up — and always reports `200`. This catches a downstream
+  image that declared an endpoint but never installed the CLI,
+  before it 500s on first real request.
+- **Graceful drain on shutdown.** `run()` now sets uvicorn's
+  `timeout_graceful_shutdown` from `URL2CODE_DRAIN_SECONDS`
+  (default 30). On SIGTERM uvicorn stops accepting new requests
+  and waits up to that window for in-flight CLI runs to finish,
+  so a rolling deploy doesn't kill a mid-conversion request. A
+  shutdown log line marks the drain.
+
+### Changed
+- `ENGINE_VERSION` `1.3.0 -> 1.4.0`.
+- `config` gains `resolve_executable` + `missing_executables`
+  helpers (pure, unit-tested) backing the readiness check.
+
+### Compatibility
+- Additive: `/readyz` is a new route and the drain default
+  preserves prior shutdown behavior within the 30s window.
+  Existing consumers need no changes; they can wire `/readyz`
+  into their compose / orchestrator healthcheck when they next
+  roll a release.
+
 ## [1.3.0] - 2026-06-01
 
 ### Added
@@ -387,7 +418,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/cobdfamily/url2code/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/cobdfamily/url2code/compare/v1.1.1...v1.3.0
 [1.1.1]: https://github.com/cobdfamily/url2code/compare/v1.0.8...v1.1.1
 [1.0.7]: https://github.com/cobdfamily/url2code/compare/v1.0.6...v1.0.7

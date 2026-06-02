@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 import os
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -32,6 +33,7 @@ from .config import (
     build_full_path,
     effective_limits,
     load_config,
+    missing_executables,
     summarize_config,
 )
 from .executor import execute_endpoint, request_template_values
@@ -237,7 +239,7 @@ def register_endpoint(
     )
 
 
-ENGINE_VERSION = "1.3.0"
+ENGINE_VERSION = "1.4.0"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the
@@ -245,6 +247,17 @@ YAML. Downstream images (cobdfamily/needle, etc.) override
 this by setting their own api.version so the liveness
 response carries the consumer's identity.
 """
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Startup: config is already loaded at import; nothing to warm.
+    yield
+    # Shutdown: uvicorn has stopped accepting new connections and is
+    # draining in-flight requests (up to timeout_graceful_shutdown,
+    # set from URL2CODE_DRAIN_SECONDS in run()). Leave a breadcrumb
+    # so a rolling deploy is visible in the logs.
+    logger.info("url2code draining and shutting down", extra={"status_code": 200})
 
 
 def create_app(config: AppConfig) -> FastAPI:
@@ -256,6 +269,7 @@ def create_app(config: AppConfig) -> FastAPI:
         title=config.api.title,
         version=reported_version,
         redoc_url="/redocs",
+        lifespan=_lifespan,
     )
 
     # One token-bucket limiter shared across the app's endpoints;
@@ -275,6 +289,23 @@ def create_app(config: AppConfig) -> FastAPI:
             "status": "ok",
             "version": app.version,
         }
+
+    @app.get("/readyz", tags=["Health"])
+    async def readyz() -> dict[str, object]:
+        # Readiness is not liveness. `/` being 200 only says the
+        # process is up; it says nothing about whether the wrapped
+        # CLIs were actually installed in this image. /readyz probes
+        # each endpoint's executable and returns 503 (with the
+        # missing names) if any is absent, so an orchestrator keeps
+        # the instance out of rotation rather than routing traffic
+        # that would 500 on first use.
+        missing = missing_executables(config)
+        if missing:
+            raise HTTPException(
+                status_code=503,
+                detail={"status": "not ready", "missing": missing},
+            )
+        return {"status": "ready", "checked": len(config.endpoints)}
 
     for endpoint in config.endpoints:
         register_endpoint(app, endpoint, config.api.default_root, config.limits, limiter)
@@ -315,4 +346,14 @@ def run() -> None:
     import uvicorn
     host = os.getenv("URL2CODE_HOST", "0.0.0.0")
     port = int(os.getenv("URL2CODE_PORT", "8000"))
-    uvicorn.run("url2code.main:app", host=host, port=port, reload=False)
+    # Graceful drain window for rolling deploys: uvicorn stops
+    # accepting new requests on SIGTERM, then waits up to this many
+    # seconds for in-flight CLI runs to finish before exiting.
+    drain = int(os.getenv("URL2CODE_DRAIN_SECONDS", "30"))
+    uvicorn.run(
+        "url2code.main:app",
+        host=host,
+        port=port,
+        reload=False,
+        timeout_graceful_shutdown=drain,
+    )

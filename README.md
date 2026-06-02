@@ -24,6 +24,7 @@ YAML-driven FastAPI wrapper for CLI tools. Each endpoint is declared in YAML, ca
 - **Optional response-shape templating** (see below) -- reshape the response body to whatever JSON your consumer needs (Redfish, HAL, custom schema). Endpoints without a template keep the classic envelope.
 - Structured JSON logs for success, failures, parsing errors, and timeouts
 - Optional per-endpoint rate limiting and request-size caps (`429` / `413`)
+- Split liveness (`/`) and readiness (`/readyz`) probes; graceful shutdown drain
 - Lightweight container via `python:3.12-slim`
 - `uv` included in the container for installing Python-distributed CLI tools
 
@@ -447,6 +448,27 @@ Configuration is validated at startup and fails fast on:
 - conflicting upload/output placeholders within an endpoint
 
 Startup logs also include a compact config summary listing each endpoint path plus counts for flags, uploads, and output files.
+
+## Health checks
+
+Two probes, distinct on purpose:
+
+- **`GET /`** — *liveness*. The process is up and serving. Always
+  `200` (`{"service": ..., "status": "ok", "version": ...}`). Use
+  it to decide whether to restart the container.
+- **`GET /readyz`** — *readiness*. Every wrapped CLI is actually
+  present: each endpoint's `command.executable` is probed (a
+  path-like value must exist and be executable; a bare name must
+  resolve on `PATH`). `200 {"status": "ready", "checked": N}` when
+  all are present, `503 {"status": "not ready", "missing": [...]}`
+  when any is absent. Use it to decide whether to route traffic —
+  an image that declared an endpoint but forgot to install the CLI
+  fails readiness instead of 500-ing on first request.
+
+On shutdown (SIGTERM) the server stops accepting new requests and
+drains in-flight CLI runs for up to `URL2CODE_DRAIN_SECONDS`
+(default 30) before exiting, so rolling deploys don't kill a
+mid-conversion request.
 
 ## Container
 

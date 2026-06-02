@@ -97,6 +97,13 @@ Behind your TLS reverse proxy, route
 # {"service":"url2code","status":"ok","version":"1.0.4"}
 curl -fsS https://tools.cobd.ca/
 
+# Readiness — 200 only if every wrapped CLI is installed:
+# {"status":"ready","checked":3}
+# 503 with a {"missing":[...]} list if a declared tool didn't
+# make it into the image. Point your orchestrator's readiness
+# check here; keep liveness on `/`.
+curl -fsS https://tools.cobd.ca/readyz
+
 # Generated OpenAPI docs:
 #   https://tools.cobd.ca/docs    (Swagger UI)
 #   https://tools.cobd.ca/redocs  (ReDoc, trailing s)
