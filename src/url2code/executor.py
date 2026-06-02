@@ -270,6 +270,15 @@ def request_template_values(
         key: _stringify_template_value(value)
         for key, value in _resolved_override_values(endpoint, request).items()
     })
+    # Route path parameters (e.g. /Systems/{id}) merge last, so the
+    # URL's resource identifier wins for a command placeholder of the
+    # same name. Each is run through the endpoint's `validations`
+    # entry if one exists (type coercion / enum / number check), and
+    # passed through unchanged otherwise.
+    for key, value in request.path_params.items():
+        values[key] = _stringify_template_value(
+            _coerce_override_value(endpoint, key, value)
+        )
     return values
 
 

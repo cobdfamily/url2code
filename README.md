@@ -245,6 +245,37 @@ see what the CLI actually returned alongside the
 template mismatch. Loud failures beat silent half-
 correct output.
 
+## Path parameters
+
+A `route` may contain `{name}` segments. Each captured segment is
+available as a command-arg placeholder and in response templates
+as `request.<name>`:
+
+```yaml
+- name: get-system
+  route: /Systems/{id}
+  method: GET
+  command:
+    executable: /app/bin/system-info
+    args: ["{id}"]
+  request:
+    validations:
+      id: { type: text }   # optional: type / enum / number coercion
+  output:
+    mode: native_json
+    template:
+      "@odata.id": "/redfish/v1/Systems/{request.id}"
+      Id: "{request.id}"
+```
+
+`GET /Systems/1` fills `{id}` with `1` for the command and
+`request.id` for the template. Path params merge **last**, so the
+URL identifier wins over a same-named body/query value. Declaring
+a `validations` entry for the param name applies the usual type /
+enum / number check; without one it's passed through as text. One
+endpoint can thus serve a whole family of resources (e.g. a
+multi-member Redfish collection).
+
 ## Rate limiting and size caps
 
 Optional, opt-in abuse resistance. Add a `limits:` block at the

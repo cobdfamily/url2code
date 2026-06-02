@@ -5,6 +5,31 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-01
+
+### Added
+- **Route path parameters.** An endpoint whose `route` contains
+  `{name}` segments (e.g. `/Systems/{id}`) now exposes each
+  captured segment as a command-arg placeholder (`{id}`) and in
+  the response-template context as `request.<name>`. Path params
+  merge into the value bag last, so the URL's resource identifier
+  wins for a same-named placeholder; each is run through the
+  endpoint's `validations` entry when one is declared (type /
+  enum / number coercion) and passed through as text otherwise.
+  This lets one endpoint serve a family of resources — the
+  enabler for multi-member Redfish collections in
+  cobdfamily/salmon.
+
+### Changed
+- `ENGINE_VERSION` `1.6.0 -> 1.7.0`.
+- `ToolRequest` gains a `path_params` field; `main.py` populates
+  it from `request.path_params` (Starlette captures route matches
+  even when the handler doesn't declare them in its signature).
+
+### Compatibility
+- Additive: endpoints whose route has no `{...}` segments are
+  unchanged.
+
 ## [1.6.0] - 2026-06-01
 
 ### Added
@@ -477,7 +502,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/cobdfamily/url2code/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/cobdfamily/url2code/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/cobdfamily/url2code/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/cobdfamily/url2code/compare/v1.3.0...v1.4.0

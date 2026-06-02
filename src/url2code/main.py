@@ -192,6 +192,14 @@ def register_endpoint(
                             headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
                         )
                 tool_request, uploads = await parse_request(request, endpoint)
+                # Route path params (e.g. /Systems/{id}) become command
+                # placeholders + response-template values. Starlette
+                # captures them on the route match even though this
+                # handler doesn't declare them in its signature.
+                if request.path_params:
+                    tool_request = tool_request.model_copy(
+                        update={"path_params": {k: str(v) for k, v in request.path_params.items()}}
+                    )
                 with _tracer.start_as_current_span("cli.execute") as cli_span:
                     # Executable only — never the full argv, which can
                     # carry request-supplied values.
@@ -279,7 +287,7 @@ def register_endpoint(
     )
 
 
-ENGINE_VERSION = "1.6.0"
+ENGINE_VERSION = "1.7.0"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the

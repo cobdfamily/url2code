@@ -19,6 +19,11 @@ class ToolRequest(BaseModel):
     flag_values: dict[str, Any] = Field(default_factory=dict)
     extra_args: list[str] = Field(default_factory=list)
     stdin: str | None = None
+    # Route path parameters (e.g. /Systems/{id} -> {"id": "1"}).
+    # Merged into the command-arg value bag and the response-
+    # template context (request.<name>). Empty for endpoints whose
+    # route has no {placeholder} segments.
+    path_params: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolResponse(BaseModel):
