@@ -5,6 +5,29 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-06-01
+
+GA for 2.0 — the async executor (2.0.0rc1, below) plus streamed
+upload I/O. The RC baked with no consumer regressions.
+
+### Added
+- **Streamed upload-to-disk.** Multipart uploads are now copied to
+  their temp path in fixed-size chunks (`shutil.copyfileobj`)
+  instead of `read()`-ing the whole body into memory, so a large
+  payload (e.g. a 200 MB deck for outofoffice) lands on disk
+  without a RAM spike proportional to its size. Pairs with the
+  1.3.0 `max_request_bytes` cap (oversize bodies are still rejected
+  up front). Output-file downloads already stream via the route's
+  `FileResponse`, so the whole upload→convert→download path is now
+  streamed end-to-end.
+
+### Changed
+- `ENGINE_VERSION` `2.0.0rc1 -> 2.0.0`.
+
+### Note
+- Everything in 2.0.0rc1 (the breaking async-executor change) is
+  included; see that entry below.
+
 ## [2.0.0rc1] - 2026-06-01
 
 Release candidate for 2.0 — the async executor. Tagged as an RC to
@@ -528,7 +551,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v2.0.0rc1...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/cobdfamily/url2code/compare/v2.0.0rc1...v2.0.0
 [2.0.0rc1]: https://github.com/cobdfamily/url2code/compare/v1.7.0...v2.0.0rc1
 [1.7.0]: https://github.com/cobdfamily/url2code/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/cobdfamily/url2code/compare/v1.5.0...v1.6.0

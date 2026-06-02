@@ -22,6 +22,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,9 +105,17 @@ def _write_upload(
     suffix = Path(upload.filename or "").suffix
     name = _render_upload_name(upload_config, template_values, suffix)
     path = Path(upload_config.temp_dir) / name
+    upload.file.seek(0)
     with path.open("wb") as handle:
-        upload.file.seek(0)
-        handle.write(upload.file.read())
+        # Stream the upload to disk in chunks rather than read() the
+        # whole body into memory: a large multipart payload (e.g. a
+        # 200 MB deck for outofoffice) lands on disk without a RAM
+        # spike proportional to its size. shutil.copyfileobj copies
+        # in fixed-size blocks (64 KiB). Pairs with the 1.3.0
+        # max_request_bytes cap, which rejects oversize bodies up
+        # front. (Output-file downloads already stream: the route's
+        # FileResponse sends the file in chunks, never buffering it.)
+        shutil.copyfileobj(upload.file, handle)
     return str(path)
 
 
