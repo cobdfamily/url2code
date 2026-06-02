@@ -34,6 +34,27 @@ Within a couple of minutes:
 - `kibble.apps.blindhub.ca/cobdfamily/url2code:1.0.4`
 - `kibble.apps.blindhub.ca/cobdfamily/url2code:latest`
 
+## Pin the base image (downstream consumers)
+
+Downstream images (brl, needle, outofoffice, pandoc,
+salmon, ...) build `FROM
+kibble.apps.blindhub.ca/cobdfamily/url2code:<tag>`. Always
+pin `<tag>` — via the Dockerfile's `ARG URL2CODE_TAG` — to a
+**released engine version** (e.g. `1.0.8`), never `latest`.
+
+Why: `latest` floats. A consumer built against `:latest` can
+change behavior between two otherwise-identical rebuilds the
+moment a new engine ships, with nothing in the consumer's own
+history to explain it. Pinning makes the build reproducible
+and turns an engine upgrade into a deliberate one-line bump
+with its own commit, CI run, and changelog entry.
+
+The running engine version is observable two ways: the `/`
+liveness response (`version` field) and the
+`url2code engine starting` startup log line, which records
+both the engine version and the consumer's reported
+`api.version`.
+
 ## Configure
 
 Mount your `config.yaml` and a writable temp dir for

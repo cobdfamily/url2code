@@ -5,6 +5,33 @@ Versioning: SemVer; major bumps may break.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-01
+
+### Added
+- Startup log line recording the resolved engine version.
+  `build_application` now emits an `url2code engine starting`
+  log carrying `engine_version` (the hard-coded
+  `ENGINE_VERSION`) and `reported_version` (the consumer's
+  `api.version` when set, else the engine version). An
+  operator can confirm from the logs which engine build a
+  downstream image is running, not just from the `/` liveness
+  probe.
+
+### Changed
+- `ENGINE_VERSION` `1.1.0 -> 1.1.1`.
+
+### Docs
+- DEPLOYMENT.md: new "Pin the base image (downstream
+  consumers)" section. Downstream images must pin
+  `URL2CODE_TAG` to a released engine version (e.g. `1.0.8`),
+  never `latest`, so a base-image change can't silently alter
+  a consumer's behavior between rebuilds.
+
+### Note
+- First tagged release since 1.0.8. It also ships the 1.1.0
+  response-shape templating work (see the 1.1.0 entry below),
+  which was merged to main but never tagged.
+
 ## [1.1.0] - 2026-05-26
 
 ### Added
@@ -320,7 +347,8 @@ publishing to the kibble registry).
   instances. Switched the fixture to construct
   `UploadConfig(...)` directly.
 
-[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.0.7...HEAD
+[Unreleased]: https://github.com/cobdfamily/url2code/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/cobdfamily/url2code/compare/v1.0.8...v1.1.1
 [1.0.7]: https://github.com/cobdfamily/url2code/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/cobdfamily/url2code/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/cobdfamily/url2code/compare/v1.0.4...v1.0.5

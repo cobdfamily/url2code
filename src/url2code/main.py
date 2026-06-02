@@ -182,7 +182,7 @@ def register_endpoint(app: FastAPI, endpoint: EndpointConfig, default_root: str)
     )
 
 
-ENGINE_VERSION = "1.1.0"
+ENGINE_VERSION = "1.1.1"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the
@@ -226,6 +226,20 @@ def build_application() -> FastAPI:
     config_path = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH)
     config = load_config(config_path)
     configure_logging(config.logging.level)
+    # Record which engine build is actually running. engine_version
+    # is the hard-coded ENGINE_VERSION; reported_version is what /
+    # liveness will report (the consumer's api.version when set, else
+    # the engine version). Lets an operator confirm a downstream
+    # image's base from the logs, not just the liveness probe.
+    logger.info(
+        "url2code engine starting",
+        extra={
+            "status_code": 200,
+            "engine_version": ENGINE_VERSION,
+            "reported_version": config.api.version or ENGINE_VERSION,
+            "service": config.api.title,
+        },
+    )
     logger.info(
         "Loaded configuration",
         extra={"status_code": 200, "config_summary": summarize_config(config)},
