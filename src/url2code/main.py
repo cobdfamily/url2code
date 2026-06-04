@@ -56,13 +56,19 @@ logger = logging.getLogger("cli_api")
 _tracer = get_tracer()
 
 
-def build_output_download_path(endpoint_path: str, output_placeholder: str, filename: str = "{filename}") -> str:
+def build_output_download_path(
+    endpoint_path: str, output_placeholder: str, filename: str = "{filename}"
+) -> str:
     return f"{endpoint_path.rstrip('/')}/downloads/{output_placeholder}/{filename}"
 
 
-def register_download_routes(app: FastAPI, endpoint: EndpointConfig, endpoint_path: str) -> dict[str, str]:
+def register_download_routes(
+    app: FastAPI, endpoint: EndpointConfig, endpoint_path: str
+) -> dict[str, str]:
     download_templates: dict[str, str] = {}
-    output_file_lookup = {output_file.placeholder: output_file for output_file in endpoint.output_files}
+    output_file_lookup = {
+        output_file.placeholder: output_file for output_file in endpoint.output_files
+    }
 
     if not output_file_lookup:
         return download_templates
@@ -95,6 +101,7 @@ def register_download_routes(app: FastAPI, endpoint: EndpointConfig, endpoint_pa
 
     return download_templates
 
+
 def _build_template_context(
     endpoint: EndpointConfig,
     tool_request,
@@ -116,15 +123,14 @@ def _build_template_context(
     """
     return {
         "parsed_output": response.parsed_output,
-        "stdout":        response.stdout,
-        "stderr":        response.stderr,
-        "duration_ms":   response.duration_ms,
-        "exit_code":     response.exit_code,
-        "endpoint":      response.endpoint,
-        "command":       response.command,
-        "request":       request_template_values(
-                              endpoint, tool_request),
-        "static":        endpoint.output.template_static,
+        "stdout": response.stdout,
+        "stderr": response.stderr,
+        "duration_ms": response.duration_ms,
+        "exit_code": response.exit_code,
+        "endpoint": response.endpoint,
+        "command": response.command,
+        "request": request_template_values(endpoint, tool_request),
+        "static": endpoint.output.template_static,
     }
 
 
@@ -205,7 +211,10 @@ def register_endpoint(
                     # carry request-supplied values.
                     cli_span.set_attribute("cli.executable", endpoint.command.executable)
                     response = await execute_endpoint(
-                        endpoint, tool_request, uploads, download_templates,
+                        endpoint,
+                        tool_request,
+                        uploads,
+                        download_templates,
                     )
                     cli_span.set_attribute("cli.exit_code", response.exit_code)
                 duration_seconds = response.duration_ms / 1000.0
@@ -219,7 +228,9 @@ def register_endpoint(
                 # AND the raw envelope, so operators can see what
                 # the CLI actually returned alongside the mismatch.
                 context = _build_template_context(
-                    endpoint, tool_request, response,
+                    endpoint,
+                    tool_request,
+                    response,
                 )
                 try:
                     body = render_template(endpoint.output.template, context)
@@ -267,10 +278,10 @@ def register_endpoint(
     # Content-Type) with no schema, which is honest -- the
     # shape is whatever the YAML template says it is.
     add_route_kwargs: dict = {
-        "path":        path,
-        "endpoint":    handler,
-        "methods":     [endpoint.method],
-        "name":        endpoint.name,
+        "path": path,
+        "endpoint": handler,
+        "methods": [endpoint.method],
+        "name": endpoint.name,
         "description": endpoint.description,
     }
     if not has_template:
@@ -279,9 +290,9 @@ def register_endpoint(
     logger.info(
         "Registered endpoint",
         extra={
-            "endpoint":    endpoint.name,
-            "route":       path,
-            "templated":   has_template,
+            "endpoint": endpoint.name,
+            "route": path,
+            "templated": has_template,
             "status_code": 200,
         },
     )
@@ -408,6 +419,7 @@ app = build_application()
 def run() -> None:
     """Console-script entrypoint (`uv run url2code`)."""
     import uvicorn
+
     host = os.getenv("URL2CODE_HOST", "0.0.0.0")
     port = int(os.getenv("URL2CODE_PORT", "8000"))
     # Graceful drain window for rolling deploys: uvicorn stops
