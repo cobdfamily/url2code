@@ -287,7 +287,7 @@ def register_endpoint(
     )
 
 
-ENGINE_VERSION = "2.0.0"
+ENGINE_VERSION = "2.1.0"
 """Hard-coded url2code engine version.
 
 Surfaced on / liveness when no api.version is set in the
